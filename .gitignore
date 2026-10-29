@@ -9,6 +9,7 @@ __pycache__/
 *.py[cod]
 
 # Bancos locais (sessões e dados gravados pelo assistente)
+var/
 *.db
 *.db-journal
 *.db-shm
