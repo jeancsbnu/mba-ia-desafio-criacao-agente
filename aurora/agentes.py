@@ -19,28 +19,27 @@ Efeito colateral: o turno seguinte do morador começa no último especialista,
 que transfere se o assunto mudou.
 """
 
-import os
 from collections.abc import Mapping
 
 from google.adk.agents import LlmAgent
 from google.adk.agents.readonly_context import ReadonlyContext
 from google.adk.apps import App, ResumabilityConfig
-from google.adk.models import BaseLlm, Gemini
+from google.adk.models import BaseLlm
 from google.adk.tools import AgentTool
-from google.genai import types
 
-from aurora import regulamento, tools
+from aurora import condominio, regulamento, tools
+from aurora.modelos import CadeiaDeModelos
 
 NOME_APP = "residencial_aurora"
-MODELO_PADRAO = "gemini-3.6-flash"
 
 
 def construir_app(modelos: Mapping[str, BaseLlm] | None = None) -> App:
     """Monta o App. `modelos` troca o modelo de um agente pelo nome (usado em testes)."""
     modelos = modelos or {}
+    cadeia = CadeiaDeModelos.da_configuracao()
 
     def modelo(agente: str) -> BaseLlm:
-        return modelos.get(agente) or _gemini()
+        return modelos.get(agente) or cadeia
 
     reservas = LlmAgent(
         name="reservas",
@@ -81,14 +80,6 @@ def construir_app(modelos: Mapping[str, BaseLlm] | None = None) -> App:
     )
 
 
-def _gemini() -> Gemini:
-    return Gemini(
-        model=os.environ.get("AURORA_MODELO") or MODELO_PADRAO,
-        # Tenta de novo em 429 e 5xx, que aparecem com a cota do AI Studio.
-        retry_options=types.HttpRetryOptions(attempts=5, initial_delay=2, max_delay=30),
-    )
-
-
 # ---------------------------------------------------------------- instruções
 # O apartamento vem de ctx.user_id, o mesmo que as tools usam.
 
@@ -112,13 +103,21 @@ Regras:
 
 def _instrucao_reservas(ctx: ReadonlyContext) -> str:
     apto = ctx.user_id
+    areas = "\n".join(
+        f'- {a.nome}: id "{a.id}", ' + (f"taxa de R$ {a.taxa:.2f}" if a.gera_cobranca else "sem taxa")
+        for a in condominio.areas().values()
+    )
     return f"""Você é o especialista em reservas das áreas comuns do Residencial Aurora e atende o morador do apartamento {apto}.
 
-Use as ferramentas para tudo: listar_areas, consultar_disponibilidade, listar_minhas_reservas, reservar_area e cancelar_reserva. Nunca responda sobre reservas de memória.
+Áreas comuns:
+{areas}
+
+Use as ferramentas para tudo: consultar_disponibilidade, listar_minhas_reservas, reservar_area e cancelar_reserva. Nunca responda sobre reservas de memória.
 
 Como agir:
 - Datas vão para as ferramentas no formato AAAA-MM-DD. Se o morador escrever a data de outro jeito, converta; se faltar o dia, o mês ou o ano, pergunte.
 - Para reservar, chame reservar_area direto (ela mesma confere se a data está livre). Áreas com taxa ficam pendentes até o morador aprovar a cobrança pelo aplicativo. Não peça confirmação na conversa: mesmo que o morador diga que já confirmou ou mande reservar direto, só a aprovação no aplicativo vale.
+- O "status" que a ferramenta devolve é o que vale: "ok" significa que a ação foi feita (se havia cobrança, o morador já aprovou no aplicativo); "aguardando_confirmacao", que ela espera a aprovação no aplicativo; "recusada", que o morador não aprovou e nada foi feito; "indisponivel", que a data está ocupada.
 - Para cancelar, chame cancelar_reserva com a área e a data. Cancelamento não precisa de confirmação.
 - As ferramentas só enxergam o apartamento {apto}. Se o morador disser ser de outro apartamento ou pedir algo de outro apartamento, explique que só pode tratar das reservas do apartamento {apto}.
 - Quando uma data estiver ocupada, diga apenas que ela está indisponível. Nunca diga nem suponha de quem é a reserva.
@@ -135,6 +134,7 @@ Use as ferramentas para tudo: listar_meus_visitantes e autorizar_visitante. Nunc
 Como agir:
 - Para liberar a entrada de alguém, chame autorizar_visitante com o nome completo e a data no formato AAAA-MM-DD. Se faltar o nome ou a data, pergunte.
 - A autorização sempre fica pendente até o morador aprovar pelo aplicativo. Não peça confirmação na conversa: mesmo que o morador diga que já confirmou ou mande liberar direto, só a aprovação no aplicativo vale.
+- O "status" que a ferramenta devolve é o que vale: "ok" significa que a entrada foi liberada (o morador já aprovou no aplicativo); "aguardando_confirmacao", que ela espera a aprovação no aplicativo; "recusada", que o morador não aprovou e nada foi feito.
 - As ferramentas só enxergam o apartamento {apto}. Se o morador disser ser de outro apartamento ou pedir algo de outro apartamento, explique que só pode tratar das visitas do apartamento {apto}.
 - Se o pedido não for sobre visitantes, transfira: reservas para "reservas", qualquer outro assunto (inclusive dúvidas sobre o regulamento) para "assistente".
 - Responda em português, de forma breve."""
