@@ -39,6 +39,13 @@ CREATE TABLE IF NOT EXISTS visitantes (
     PRIMARY KEY (apartamento, nome, data)
 );
 
+-- Apartamento dono de cada sessão, gravado uma única vez na criação. A API usa
+-- para achar a sessão no ADK, que a guarda com user_id = apartamento.
+CREATE TABLE IF NOT EXISTS sessoes (
+    session_id  TEXT PRIMARY KEY,
+    apartamento TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS meta (
     chave TEXT PRIMARY KEY,
     valor TEXT NOT NULL
@@ -96,6 +103,27 @@ def restaurar() -> tuple[int, int]:
     _criar_esquema()
     with transacao() as con:
         return _carregar_estado_inicial(con)
+
+
+def registrar_sessao(session_id: str, apartamento: str) -> None:
+    with transacao() as con:
+        con.execute(
+            "INSERT INTO sessoes (session_id, apartamento) VALUES (?, ?)", (session_id, apartamento)
+        )
+
+
+def apartamento_da_sessao(session_id: str) -> str | None:
+    with leitura() as con:
+        linha = con.execute(
+            "SELECT apartamento FROM sessoes WHERE session_id = ?", (session_id,)
+        ).fetchone()
+    return linha["apartamento"] if linha else None
+
+
+def esquecer_sessoes() -> None:
+    _criar_esquema()
+    with transacao() as con:
+        con.execute("DELETE FROM sessoes")
 
 
 def _criar_esquema() -> None:
