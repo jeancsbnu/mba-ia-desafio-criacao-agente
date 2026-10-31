@@ -37,6 +37,7 @@ def _apagar_sessoes() -> None:
             arquivo.unlink(missing_ok=True)
     except PermissionError:
         raise SystemExit(f"Não foi possível apagar {config.BANCO_SESSOES}: pare a API e rode de novo.")
+    banco.esquecer_sessoes()
     print(f"Sessões apagadas ({config.BANCO_SESSOES}).")
 
 
