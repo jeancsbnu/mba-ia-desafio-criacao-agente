@@ -74,6 +74,7 @@ A ordem padrão é `gemini-3.6-flash → gemini-3.5-flash → gemini-2.5-flash �
 | [`aurora/modelos.py`](aurora/modelos.py) | Cadeia de modelos Gemini |
 | [`aurora/restaurar.py`](aurora/restaurar.py) | Comando de restauração |
 | [`aurora/__main__.py`](aurora/__main__.py) | Comando de subida (`python -m aurora`) |
+| [`scripts/fluxo_avaliador.py`](scripts/fluxo_avaliador.py) | Roda o fluxo do avaliador (passos 1 a 14) contra a API |
 
 Os arquivos de `dados/` são só o estado inicial e não são alterados. O que o assistente grava vai para `var/` (fora do Git):
 
@@ -370,6 +371,7 @@ Preencha o `.env`:
 | `GOOGLE_API_KEY` | sim | chave do Google AI Studio |
 | `GOOGLE_GENAI_USE_VERTEXAI` | não | `FALSE` (usa o AI Studio, que já é o padrão) |
 | `AURORA_MODELOS` | não | modelos Gemini em ordem de preferência, separados por vírgula. Padrão: `gemini-3.6-flash,gemini-3.5-flash,gemini-2.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite` |
+| `AURORA_PORTA` | não | porta da API (padrão `8000`) |
 
 Instale as dependências:
 
@@ -414,7 +416,26 @@ A API sobe em `http://localhost:8000`. Ctrl+C para parar. Subir de novo com o me
 
 As rotas com `{session_id}` respondem `404` quando a sessão não existe. A criação de sessão responde `422` para um apartamento que não está em `dados/apartamentos.json`. Se todos os modelos da cadeia falharem, as rotas de conversa respondem `503`.
 
-Exemplo:
+Com a API no ar, `http://localhost:8000/docs` abre uma tela interativa (Swagger) para chamar cada rota pelo navegador.
+
+### Testar o fluxo completo
+
+O script [`scripts/fluxo_avaliador.py`](scripts/fluxo_avaliador.py) roda sozinho os passos 1 a 14 do fluxo do avaliador, com o Gemini real. Ele:
+
+- usa uma pasta de dados temporária e a porta 8001, então não mexe em `var/` nem na API da porta 8000;
+- restaura os dados, sobe a API e roda os passos 1 a 12;
+- derruba a API à força e sobe de novo, sem restaurar, para rodar os passos 13 e 14;
+- dispara as duas aprovações do passo 14 ao mesmo tempo.
+
+Ele imprime cada mensagem, a resposta e cada verificação (✔/✘), e sai com código 1 se alguma falhar. O fluxo faz algumas dezenas de chamadas ao Gemini.
+
+```bash
+uv run python scripts/fluxo_avaliador.py
+```
+
+Use `--porta` para trocar a porta e `--manter` para guardar os bancos e o log da API no fim.
+
+### Exemplo com curl
 
 ```bash
 SID=$(curl -s -X POST localhost:8000/sessoes -H 'Content-Type: application/json' -d '{"apartamento":"101"}' | python -c "import sys,json; print(json.load(sys.stdin)['session_id'])")
