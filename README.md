@@ -45,10 +45,10 @@ Testamos as quatro combinações, com sessão em SQLite e o Runner recriado entr
 
 | App retomável | Especialistas podem transferir | Aprovação |
 |---|---|---|
-| sim | não | perdida, sem erro: nada executa |
-| sim | sim | **chega ao especialista e executa uma vez** |
-| não | não | perdida, sem erro: nada executa |
-| não | sim | **chega ao especialista e executa uma vez** |
+| sim | não | **instável**: em parte das execuções se perde sem erro (4 de 8) |
+| sim | sim | **chega ao especialista e executa uma vez** (80 de 80) |
+| não | não | perdida, sem erro: nada executa (8 de 8) |
+| não | sim | **chega ao especialista e executa uma vez** (80 de 80) |
 
 Por isso os especialistas podem transferir, de volta ao principal e entre si. O efeito colateral é que o turno seguinte do morador começa no último especialista, e as instruções mandam ele transferir quando o assunto muda. O `App` usa `ResumabilityConfig(is_resumable=True)`, o caminho do ADK 2 para pausar em chamadas longas.
 
@@ -75,6 +75,7 @@ A ordem padrão é `gemini-3.6-flash → gemini-3.5-flash → gemini-2.5-flash �
 | [`aurora/restaurar.py`](aurora/restaurar.py) | Comando de restauração |
 | [`aurora/__main__.py`](aurora/__main__.py) | Comando de subida (`python -m aurora`) |
 | [`scripts/fluxo_avaliador.py`](scripts/fluxo_avaliador.py) | Roda o fluxo do avaliador (passos 1 a 14) contra a API |
+| [`tests/`](tests/conftest.py) | Testes automáticos (`pytest`), sem chamar o Gemini |
 
 Os arquivos de `dados/` são só o estado inicial e não são alterados. O que o assistente grava vai para `var/` (fora do Git):
 
@@ -417,6 +418,23 @@ A API sobe em `http://localhost:8000`. Ctrl+C para parar. Subir de novo com o me
 As rotas com `{session_id}` respondem `404` quando a sessão não existe. A criação de sessão responde `422` para um apartamento que não está em `dados/apartamentos.json`. Se todos os modelos da cadeia falharem, as rotas de conversa respondem `503`.
 
 Com a API no ar, `http://localhost:8000/docs` abre uma tela interativa (Swagger) para chamar cada rota pelo navegador.
+
+### Testes automáticos
+
+```bash
+uv run pytest
+```
+
+Os testes rodam em segundos e **não chamam o Gemini**: cada agente recebe um LLM roteirizado, que devolve respostas combinadas e falha se for chamado fora do roteiro. A chave é removida do ambiente durante os testes. Cada teste usa bancos novos numa pasta temporária, sem mexer em `var/`.
+
+| Arquivo | O que cobre |
+|---|---|
+| [`tests/test_condominio.py`](tests/test_condominio.py) | Estado inicial, isolamento entre apartamentos, códigos que não se repetem, restauração e 20 threads disputando a mesma reserva (G5) |
+| [`tests/test_tools.py`](tests/test_tools.py) | Nenhuma tool recebe apartamento (G2); confirmação por taxa e de visitante (G1); data ocupada sem vazar dono; um capítulo por vez (G4) |
+| [`tests/test_agentes.py`](tests/test_agentes.py) | Runner do ADK com sessão em SQLite e reinício entre o pedido e a resposta: negar, aprovar, "já estou confirmando aqui", regulamento fora dos eventos e a matriz retomável × transferível |
+| [`tests/test_api.py`](tests/test_api.py) | Contrato: `201`, `404`, `409` (repetido, inexistente, de outra sessão), `422`, `503`, eventos após recriar a API e aprovações simultâneas (passo 14) |
+| [`tests/test_modelos.py`](tests/test_modelos.py) | Cadeia de modelos: troca em 429/503, pausa, erros que propagam |
+| [`tests/test_readme.py`](tests/test_readme.py) | Cada trecho da seção Garantias bate com as linhas do arquivo citado |
 
 ### Testar o fluxo completo
 
