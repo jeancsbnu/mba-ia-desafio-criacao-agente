@@ -368,8 +368,7 @@ Preencha o `.env`:
 
 | Variável | Obrigatória | Valor |
 |---|---|---|
-| `GOOGLE_API_KEY` | sim | chave do Google AI Studio |
-| `GOOGLE_GENAI_USE_VERTEXAI` | não | `FALSE` (usa o AI Studio, que já é o padrão) |
+| `GOOGLE_API_KEY` | sim | chave do Google AI Studio (o projeto usa o AI Studio, não o Vertex AI) |
 | `AURORA_MODELOS` | não | modelos Gemini em ordem de preferência, separados por vírgula. Padrão: `gemini-3.6-flash,gemini-3.5-flash,gemini-2.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite` |
 | `AURORA_PORTA` | não | porta da API (padrão `8000`) |
 
