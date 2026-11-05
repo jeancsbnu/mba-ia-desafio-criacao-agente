@@ -12,9 +12,9 @@
 Por que os especialistas podem transferir (para o principal e entre si): a
 aprovação só é processada pelo agente que pediu a confirmação, e o Runner só
 entrega a ele se ele for "transferível" na árvore
-(agents/_agent_router.find_agent_to_run). Com disallow_transfer_to_parent, o
-Runner manda a aprovação ao principal, que a ignora, e nada executa, sem erro.
-Testado no ADK 2.9.1 com sessão em SQLite e reinício entre pedido e aprovação.
+(agents/_agent_router.find_agent_to_run). Com disallow_transfer_to_parent, a
+aprovação se perde sem erro (sempre, sem App retomável; em parte das vezes,
+com ele). Ver tests/test_agentes.py, com SQLite e reinício no meio.
 Efeito colateral: o turno seguinte do morador começa no último especialista,
 que transfere se o assunto mudou.
 """

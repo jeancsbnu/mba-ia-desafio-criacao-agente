@@ -11,3 +11,19 @@ dependencies = [
     "sqlalchemy[asyncio]>=2,<3",
     "uvicorn>=0.54.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+# Avisos de dentro das bibliotecas (ADK e Starlette), não do código do projeto.
+filterwarnings = [
+    "ignore:\\[EXPERIMENTAL\\]:UserWarning",
+    "ignore:BaseAgentConfig is deprecated:DeprecationWarning",
+    "ignore:The `plugins` argument is deprecated:DeprecationWarning",
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
