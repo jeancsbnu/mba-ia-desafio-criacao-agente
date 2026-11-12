@@ -101,7 +101,7 @@ A tool decide em código, pela taxa de `dados/areas.json`, se a ação pede conf
                 return _indisponivel(a, data)
             return _pedir_confirmacao(
                 tool_context,
-                hint=f"Confirmar a reserva de {a.nome} em {data}, com taxa de R$ {a.taxa:.2f}.",
+                hint=f"Confirmar a reserva de {a.nome} em {data}, com taxa de {a.taxa_em_reais}.",
                 detalhes={"area": a.id, "data": data, "taxa": a.taxa},
             )
         if not confirmacao.confirmed:
@@ -210,7 +210,7 @@ def apartamento_da_sessao(tool_context: ToolContext) -> str:
 
 A consulta à agenda diz só se a data está livre:
 
-[`aurora/condominio.py`](aurora/condominio.py#L103-L112)
+[`aurora/condominio.py`](aurora/condominio.py#L108-L117)
 ```python
 def data_livre(area_id: str, data: str) -> bool:
     """Diz só se a área está livre na data, sem revelar de quem é a reserva."""
@@ -327,7 +327,7 @@ CREATE TABLE IF NOT EXISTS codigos_emitidos (codigo TEXT PRIMARY KEY);
 
 A violação vira uma resposta normal:
 
-[`aurora/condominio.py`](aurora/condominio.py#L123-L133)
+[`aurora/condominio.py`](aurora/condominio.py#L128-L138)
 ```python
     with banco.transacao() as con:
         codigo = _novo_codigo(con)

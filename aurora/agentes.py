@@ -104,7 +104,7 @@ Regras:
 def _instrucao_reservas(ctx: ReadonlyContext) -> str:
     apto = ctx.user_id
     areas = "\n".join(
-        f'- {a.nome}: id "{a.id}", ' + (f"taxa de R$ {a.taxa:.2f}" if a.gera_cobranca else "sem taxa")
+        f'- {a.nome}: id "{a.id}", ' + (f"taxa de {a.taxa_em_reais}" if a.gera_cobranca else "sem taxa")
         for a in condominio.areas().values()
     )
     return f"""Você é o especialista em reservas das áreas comuns do Residencial Aurora e atende o morador do apartamento {apto}.

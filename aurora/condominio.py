@@ -31,6 +31,11 @@ class Area:
     def gera_cobranca(self) -> bool:
         return self.taxa > 0
 
+    @property
+    def taxa_em_reais(self) -> str:
+        """A taxa no formato brasileiro, ex.: "R$ 1.500,00"."""
+        return "R$ " + f"{self.taxa:_.2f}".replace(".", ",").replace("_", ".")
+
 
 @dataclass(frozen=True)
 class Reserva:
