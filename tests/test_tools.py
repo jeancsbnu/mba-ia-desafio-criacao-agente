@@ -78,6 +78,7 @@ def test_area_com_taxa_pede_confirmacao_e_nao_grava():
     assert resultado["status"] == "aguardando_confirmacao"
     assert contexto.actions.skip_summarization
     assert contexto.pedidos[0]["payload"] == {"area": "salao-de-festas", "data": "2030-04-20", "taxa": 150.0}
+    assert "R$ 150,00" in contexto.pedidos[0]["hint"]
     assert condominio.data_livre("salao-de-festas", "2030-04-20")
 
 

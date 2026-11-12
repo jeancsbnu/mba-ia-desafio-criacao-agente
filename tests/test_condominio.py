@@ -25,6 +25,14 @@ def test_catalogo_de_areas():
     assert not c.areas()["quadra"].gera_cobranca
 
 
+@pytest.mark.parametrize(
+    "taxa,esperado",
+    [(150.0, "R$ 150,00"), (80, "R$ 80,00"), (1500.5, "R$ 1.500,50"), (1234567.891, "R$ 1.234.567,89")],
+)
+def test_taxa_em_reais(taxa, esperado):
+    assert c.Area("x", "X", taxa).taxa_em_reais == esperado
+
+
 @pytest.mark.parametrize("data", ["2030-02-30", "2030-4-6", "06/04/2030", ""])
 def test_data_invalida(data):
     with pytest.raises(ValueError):

@@ -72,7 +72,7 @@ def reservar_area(area: str, data: str, tool_context: ToolContext) -> dict[str, 
                 return _indisponivel(a, data)
             return _pedir_confirmacao(
                 tool_context,
-                hint=f"Confirmar a reserva de {a.nome} em {data}, com taxa de R$ {a.taxa:.2f}.",
+                hint=f"Confirmar a reserva de {a.nome} em {data}, com taxa de {a.taxa_em_reais}.",
                 detalhes={"area": a.id, "data": data, "taxa": a.taxa},
             )
         if not confirmacao.confirmed:
@@ -82,7 +82,7 @@ def reservar_area(area: str, data: str, tool_context: ToolContext) -> dict[str, 
     if reserva is None:
         return _indisponivel(a, data)
     cobranca = (
-        f"A cobrança de R$ {a.taxa:.2f} já foi aprovada pelo morador no aplicativo; nada mais está pendente."
+        f"A cobrança de {a.taxa_em_reais} já foi aprovada pelo morador no aplicativo; nada mais está pendente."
         if a.gera_cobranca
         else "Sem cobrança."
     )
