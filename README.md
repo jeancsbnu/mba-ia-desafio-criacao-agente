@@ -58,7 +58,9 @@ Os agentes usam a [`CadeiaDeModelos`](aurora/modelos.py): uma lista de modelos G
 
 No plano gratuito do AI Studio, vários modelos têm limite de **20 requisições por dia por projeto**, e o fluxo completo do avaliador faz algumas dezenas de chamadas. Com a cadeia, as cotas se somam.
 
-A ordem padrão é `gemini-3.6-flash → gemini-3.5-flash → gemini-2.5-flash → gemini-3.5-flash-lite → gemini-3.1-flash-lite`, e pode ser trocada em `AURORA_MODELOS`. Se todos falharem, a API responde `503` com uma mensagem.
+A ordem padrão é `gemini-3.6-flash → gemini-3.5-flash → gemini-2.5-flash → gemini-3.5-flash-lite → gemini-3.1-flash-lite`, e pode ser trocada em `AURORA_MODELOS`.
+
+Cada chamada tem **tempo limite de 60 s**. Um modelo que demora mais conta como falha (504) e a chamada passa ao próximo. Chamadas acima de 20 s aparecem no log da API. Se todos falharem, a API responde `503` com uma mensagem.
 
 ### Código
 
