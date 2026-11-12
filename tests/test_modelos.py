@@ -16,6 +16,8 @@ class Falso(Gemini):
 
     async def generate_content_async(self, llm_request, stream=False):
         chamados.append(llm_request.model)
+        if self.model == "lento":
+            await asyncio.sleep(5)
         erros = {"cota": (errors.ClientError, 429), "cheio": (errors.ServerError, 503), "ruim": (errors.ClientError, 400)}
         if self.model in erros:
             classe, codigo = erros[self.model]
@@ -58,6 +60,19 @@ def test_erro_que_nao_e_de_cota_propaga():
 def test_todos_falham_propaga_o_ultimo():
     with pytest.raises(errors.ServerError):
         pedir("cota", "cheio")
+
+
+def test_modelo_lento_passa_a_vez(monkeypatch):
+    monkeypatch.setattr(m, "_TEMPO_LIMITE", 0.2)
+    assert pedir("lento", "bom") == ["resposta de bom"]
+    assert chamados == ["lento", "bom"]
+
+
+def test_todos_lentos_viram_504(monkeypatch):
+    monkeypatch.setattr(m, "_TEMPO_LIMITE", 0.2)
+    with pytest.raises(errors.ServerError) as erro:
+        pedir("lento")
+    assert erro.value.code == 504
 
 
 def test_lista_de_modelos(monkeypatch):
