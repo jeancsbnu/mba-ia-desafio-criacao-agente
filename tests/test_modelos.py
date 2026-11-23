@@ -80,3 +80,12 @@ def test_lista_de_modelos(monkeypatch):
     assert m.modelos_configurados() == list(m.MODELOS_PADRAO)
     monkeypatch.setenv("AURORA_MODELOS", " gemini-a , gemini-b,")
     assert m.modelos_configurados() == ["gemini-a", "gemini-b"]
+
+
+def test_429_nao_e_repetido_no_mesmo_modelo(monkeypatch):
+    """Cota esgotada passa direto para o próximo modelo; só falhas passageiras repetem no mesmo."""
+    monkeypatch.setenv("AURORA_MODELOS", "gemini-a,gemini-b")
+    cadeia = m.CadeiaDeModelos.da_configuracao()
+    for modelo in cadeia.modelos:
+        codigos = modelo.retry_options.http_status_codes
+        assert 429 not in codigos and 503 in codigos

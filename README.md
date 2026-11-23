@@ -131,10 +131,10 @@ A tool decide em código, pela taxa de `dados/areas.json`, se a ação pede conf
 
 O ADK só preenche `tool_confirmation` quando o cliente responde ao pedido `adk_request_confirmation` com um `FunctionResponse`. A API só monta esse `FunctionResponse` na rota de confirmações, e só para um `id` **pendente na própria sessão**:
 
-[`aurora/conversa.py`](aurora/conversa.py#L79-L90)
+[`aurora/conversa.py`](aurora/conversa.py#L85-L96)
 ```python
     async def responder_confirmacao(self, session_id: str, confirmacao_id: str, confirmado: bool) -> Resultado:
-        async with self._travas[session_id]:
+        async with self._trava(session_id):
             sessao = await self._sessao(session_id)
             if confirmacao_id not in {p.id for p in confirmacoes_pendentes(sessao.events)}:
                 raise ConfirmacaoInexistente(confirmacao_id)
@@ -149,7 +149,7 @@ O ADK só preenche `tool_confirmation` quando o cliente responde ao pedido `adk_
 
 As pendências saem dos eventos gravados. Um pedido deixa de estar pendente assim que a resposta do morador é gravada, então reenviar o mesmo `id` recebe `409`:
 
-[`aurora/conversa.py`](aurora/conversa.py#L120-L137)
+[`aurora/conversa.py`](aurora/conversa.py#L144-L161)
 ```python
     respondidas = {
         resposta.id
@@ -171,7 +171,7 @@ As pendências saem dos eventos gravados. Um pedido deixa de estar pendente assi
                 continue
 ```
 
-[`aurora/api.py`](aurora/api.py#L145-L149)
+[`aurora/api.py`](aurora/api.py#L148-L152)
 ```python
     @api.exception_handler(ConfirmacaoInexistente)
     async def confirmacao_inexistente(request: Request, e: ConfirmacaoInexistente) -> JSONResponse:
@@ -192,7 +192,7 @@ As pendências saem dos eventos gravados. Um pedido deixa de estar pendente assi
 
 O apartamento é definido uma única vez, como o `user_id` da sessão do ADK:
 
-[`aurora/conversa.py`](aurora/conversa.py#L64-L68)
+[`aurora/conversa.py`](aurora/conversa.py#L70-L74)
 ```python
     async def criar_sessao(self, apartamento: str) -> str:
         # O apartamento vira o user_id da sessão: é dele que as tools leem (Garantia 2).
@@ -241,14 +241,14 @@ Cancelar a reserva de outro apartamento responde exatamente como uma reserva ine
 
 **Por que não depende do modelo:**
 - O `user_id` da sessão é somente leitura no `ToolContext` e é fixado pela API na criação da sessão.
-- Todas as consultas e gravações de reservas e visitantes filtram por esse apartamento no SQL.
+- Todas as consultas e gravações de reservas e visitantes do morador filtram por esse apartamento no SQL. A única consulta sem esse filtro é `data_livre`, que precisa olhar a agenda da área inteira e por isso devolve só livre ou ocupada.
 - Como os retornos das tools nunca trazem dados de outro apartamento, esses dados também não entram nos eventos nem na resposta, mesmo que o morador diga "sou do 302".
 
 ### Garantia 3: nada se perde no reinício
 
 **Onde:** [`aurora/conversa.py`](aurora/conversa.py) (`DatabaseSessionService`) e [`aurora/banco.py`](aurora/banco.py) (SQLite e `inicializar`).
 
-[`aurora/conversa.py`](aurora/conversa.py#L54-L57)
+[`aurora/conversa.py`](aurora/conversa.py#L60-L63)
 ```python
     def __init__(self, modelos: Mapping[str, BaseLlm] | None = None):
         url = f"sqlite+aiosqlite:///{config.BANCO_SESSOES.as_posix()}"
@@ -395,6 +395,8 @@ Para apagar também as sessões, com a API parada:
 uv run python -m aurora.restaurar --sessoes
 ```
 
+Sem `--sessoes`, confirmações que estavam pendentes em sessões antigas continuam pendentes e, se aprovadas, executam sobre os dados restaurados. Para começar do zero, use `--sessoes`.
+
 Na primeira subida, se `var/condominio.db` ainda não existe, a API carrega o estado inicial sozinha.
 
 ### Subir a API
@@ -416,7 +418,9 @@ A API sobe em `http://localhost:8000`. Ctrl+C para parar. Subir de novo com o me
 | `GET /apartamentos/{numero}/reservas` | `[{"codigo", "area", "data"}]` |
 | `GET /apartamentos/{numero}/visitantes` | `[{"nome", "data"}]` |
 
-As rotas com `{session_id}` respondem `404` quando a sessão não existe. A criação de sessão responde `422` para um apartamento que não está em `dados/apartamentos.json`. Se todos os modelos da cadeia falharem, as rotas de conversa respondem `503`.
+As rotas com `{session_id}` respondem `404` quando a sessão não existe. A criação de sessão responde `422` para um apartamento que não está em `dados/apartamentos.json`.
+
+Se todos os modelos da cadeia falharem, as rotas de conversa respondem `503` e nada é executado. Há uma exceção: se uma ação já tiver executado antes da falha, a resposta é `200`. Por exemplo, a aprovação gravou a reserva e só o resumo do modelo não veio. A `resposta` traz então a mensagem da própria ação, porque um `503` levaria o morador a repetir o pedido. Erros inesperados respondem `500` em JSON.
 
 Com a API no ar, `http://localhost:8000/docs` abre uma tela interativa (Swagger) para chamar cada rota pelo navegador.
 
@@ -433,8 +437,8 @@ Os testes rodam em segundos e **não chamam o Gemini**: cada agente recebe um LL
 | [`tests/test_condominio.py`](tests/test_condominio.py) | Estado inicial, isolamento entre apartamentos, códigos que não se repetem, restauração e 20 threads disputando a mesma reserva (G5) |
 | [`tests/test_tools.py`](tests/test_tools.py) | Nenhuma tool recebe apartamento (G2); confirmação por taxa e de visitante (G1); data ocupada sem vazar dono; um capítulo por vez (G4) |
 | [`tests/test_agentes.py`](tests/test_agentes.py) | Runner do ADK com sessão em SQLite e reinício entre o pedido e a resposta: negar, aprovar, "já estou confirmando aqui", regulamento fora dos eventos e a matriz retomável × transferível |
-| [`tests/test_api.py`](tests/test_api.py) | Contrato: `201`, `404`, `409` (repetido, inexistente, de outra sessão), `422`, `503`, eventos após recriar a API e aprovações simultâneas (passo 14) |
-| [`tests/test_modelos.py`](tests/test_modelos.py) | Cadeia de modelos: troca em 429/503, pausa, erros que propagam |
+| [`tests/test_api.py`](tests/test_api.py) | Contrato: `201`, `404`, `409` (repetido, inexistente, de outra sessão), `422`, `503`, `500` em JSON, eventos após recriar a API e aprovações simultâneas (passo 14). Também: modelo que falha depois da aprovação (`200` com a mensagem da ação), mensagem com pendência aberta, duas pendências na mesma sessão e duas respostas simultâneas para a mesma confirmação |
+| [`tests/test_modelos.py`](tests/test_modelos.py) | Cadeia de modelos: troca em 429/503, pausa, tempo limite, 429 sem repetir no mesmo modelo, erros que propagam |
 | [`tests/test_readme.py`](tests/test_readme.py) | Cada trecho da seção Garantias bate com as linhas do arquivo citado |
 
 ### Testar o fluxo completo

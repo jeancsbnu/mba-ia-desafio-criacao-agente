@@ -12,6 +12,7 @@ pendências são calculadas a partir dos eventos gravados, não de memória.
 """
 
 import asyncio
+import logging
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -22,10 +23,15 @@ from google.adk.flows.llm_flows.functions import REQUEST_CONFIRMATION_FUNCTION_C
 from google.adk.models import BaseLlm
 from google.adk.runners import Runner
 from google.adk.sessions import DatabaseSessionService, Session
-from google.genai import types
+from google.genai import errors, types
 
 from aurora import banco, config
 from aurora.agentes import NOME_APP, construir_app
+
+logger = logging.getLogger(__name__)
+
+# Tools internas do ADK: a resposta delas não serve de mensagem para o morador.
+_TOOLS_INTERNAS = {"transfer_to_agent", REQUEST_CONFIRMATION_FUNCTION_CALL_NAME}
 
 
 class SessaoInexistente(Exception):
@@ -71,13 +77,13 @@ class Assistente:
         return (await self._sessao(session_id)).events
 
     async def enviar_mensagem(self, session_id: str, texto: str) -> Resultado:
-        async with self._travas[session_id]:
+        async with self._trava(session_id):
             sessao = await self._sessao(session_id)
             conteudo = types.Content(role="user", parts=[types.Part(text=texto)])
             return await self._rodar(sessao, conteudo)
 
     async def responder_confirmacao(self, session_id: str, confirmacao_id: str, confirmado: bool) -> Resultado:
-        async with self._travas[session_id]:
+        async with self._trava(session_id):
             sessao = await self._sessao(session_id)
             if confirmacao_id not in {p.id for p in confirmacoes_pendentes(sessao.events)}:
                 raise ConfirmacaoInexistente(confirmacao_id)
@@ -88,6 +94,12 @@ class Assistente:
             )
             conteudo = types.Content(role="user", parts=[types.Part(function_response=resposta)])
             return await self._rodar(sessao, conteudo)
+
+    def _trava(self, session_id: str) -> asyncio.Lock:
+        # Só sessões que existem ganham trava: um id inventado dá 404 sem ocupar memória.
+        if banco.apartamento_da_sessao(session_id) is None:
+            raise SessaoInexistente(session_id)
+        return self._travas[session_id]
 
     async def _sessao(self, session_id: str) -> Session:
         apartamento = banco.apartamento_da_sessao(session_id)
@@ -101,11 +113,23 @@ class Assistente:
         return sessao
 
     async def _rodar(self, sessao: Session, conteudo: types.Content) -> Resultado:
+        eventos_antes = len(sessao.events)
         textos = []
-        async for evento in self.runner.run_async(
-            user_id=sessao.user_id, session_id=sessao.id, new_message=conteudo
-        ):
-            textos.extend(_textos(evento))
+        try:
+            async for evento in self.runner.run_async(
+                user_id=sessao.user_id, session_id=sessao.id, new_message=conteudo
+            ):
+                textos.extend(_textos(evento))
+        except errors.APIError:
+            # O modelo falhou depois de uma tool já ter executado (ex.: a aprovação
+            # gravou a reserva e só o resumo final não veio). A ação vale, então a
+            # resposta sai da própria tool, em vez de um 503 seguido de 409 no reenvio.
+            novos = (await self._sessao(sessao.id)).events[eventos_antes:]
+            mensagem = _mensagem_da_ultima_tool(novos)
+            if mensagem is None:
+                raise
+            logger.warning("O modelo falhou depois de uma tool executar; respondendo com a mensagem da tool.")
+            textos.append(mensagem)
         pendentes = confirmacoes_pendentes((await self._sessao(sessao.id)).events)
 
         resposta = "\n\n".join(textos).strip()
@@ -147,6 +171,21 @@ def confirmacoes_pendentes(eventos: list[Event]) -> list[Pendencia]:
                 )
             )
     return pendentes
+
+
+def _mensagem_da_ultima_tool(eventos: list[Event]) -> str | None:
+    """Mensagem da última tool do projeto que respondeu nestes eventos, se houver."""
+    for evento in reversed(eventos):
+        if evento.author == "user":
+            continue
+        for resposta in reversed(evento.get_function_responses()):
+            dados = resposta.response
+            if resposta.name in _TOOLS_INTERNAS or not isinstance(dados, dict):
+                continue
+            mensagem = dados.get("mensagem") or dados.get("result")  # "result": resposta de um AgentTool
+            if isinstance(mensagem, str) and mensagem.strip():
+                return mensagem.strip()
+    return None
 
 
 def _textos(evento: Event) -> list[str]:

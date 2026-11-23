@@ -4,6 +4,7 @@
 """
 
 import logging
+import os
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from typing import Any
@@ -130,6 +131,8 @@ def criar_api(modelos: Mapping[str, BaseLlm] | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def ciclo_de_vida(api: FastAPI):
+        if not modelos and not (os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")):
+            logger.warning("GOOGLE_API_KEY não está definida no .env: as mensagens ao assistente vão falhar.")
         banco.inicializar()
         api.state.assistente = Assistente(modelos)
         yield
@@ -157,6 +160,11 @@ def criar_api(modelos: Mapping[str, BaseLlm] | None = None) -> FastAPI:
             {"detail": "O assistente está indisponível no momento. Tente novamente em instantes."},
             status_code=503,
         )
+
+    @api.exception_handler(Exception)
+    async def erro_inesperado(request: Request, e: Exception) -> JSONResponse:
+        # Mantém o contrato em JSON; o traceback continua indo para o log do servidor.
+        return JSONResponse({"detail": "Erro interno do servidor."}, status_code=500)
 
     return api
 
