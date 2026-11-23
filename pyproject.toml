@@ -7,6 +7,7 @@ dependencies = [
     "aiosqlite>=0.22.1",
     "fastapi>=0.141.1",
     "google-adk==2.9.1",
+    "google-genai>=2.33.0",
     "python-dotenv>=1.2.4",
     "sqlalchemy[asyncio]>=2,<3",
     "uvicorn>=0.54.0",

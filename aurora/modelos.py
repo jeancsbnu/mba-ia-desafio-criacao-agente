@@ -29,6 +29,7 @@ MODELOS_PADRAO = (
     "gemini-3.1-flash-lite",
 )
 _CODIGOS_PARA_TROCAR = {404, 429, 500, 503, 504}
+_REPETIR_NO_MESMO_MODELO = (408, 500, 502, 503, 504)
 _PAUSA_APOS_FALHA = 120  # segundos sem tentar um modelo que falhou
 _TEMPO_LIMITE = 60  # segundos por chamada; depois disso conta como 504 e passa ao próximo
 _CHAMADA_LENTA = 20  # chamadas acima disso aparecem no log
@@ -51,9 +52,12 @@ class CadeiaDeModelos(BaseLlm):
     @classmethod
     def da_configuracao(cls) -> "CadeiaDeModelos":
         modelos = [
-            # Uma nova tentativa no mesmo modelo cobre falhas passageiras; cota
-            # esgotada passa direto para o próximo da cadeia.
-            Gemini(model=nome, retry_options=types.HttpRetryOptions(attempts=2, initial_delay=1))
+            # Uma nova tentativa no mesmo modelo cobre falhas passageiras. O 429 fica
+            # de fora (o padrão do google-genai o repete): cota esgotada passa direto
+            # para o próximo da cadeia.
+            Gemini(model=nome, retry_options=types.HttpRetryOptions(
+                attempts=2, initial_delay=1, http_status_codes=list(_REPETIR_NO_MESMO_MODELO)
+            ))
             for nome in modelos_configurados()
         ]
         return cls(model=modelos[0].model, modelos=modelos)

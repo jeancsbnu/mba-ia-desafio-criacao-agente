@@ -132,3 +132,106 @@ def test_aprovacoes_simultaneas_gravam_uma_reserva():
             t.join()
         assert sorted(status.values()) == [200, 200]
         assert len(salao(c, "101", "2030-05-11")) + len(salao(c, "201", "2030-05-11")) == 1
+
+
+# ---------------------------------------------------------------- achados da revisão
+
+
+def test_modelo_falha_depois_da_aprovacao_responde_200_com_a_mensagem_da_tool():
+    """A tool gravou a reserva e só o resumo do modelo falhou: a ação vale e a API responde 200."""
+    modelos = apoio.roteiros(assistente=[chamar("transfer_to_agent", agent_name="reservas")])
+    modelos["reservas"] = apoio.SemCotaDepois(
+        model="reservas", passos=[chamar("reservar_area", area="salao-de-festas", data="2030-04-20")]
+    )
+    with TestClient(criar_api(modelos)) as c:
+        sid = criar_sessao(c)
+        [pendente] = c.post(f"/sessoes/{sid}/mensagens", json={"texto": "Reserve o salão."}).json()["confirmacoes_pendentes"]
+        r = c.post(f"/sessoes/{sid}/confirmacoes", json={"id": pendente["id"], "confirmado": True})
+        assert r.status_code == 200
+        assert "Reserva de Salão de festas em 2030-04-20 feita" in r.json()["resposta"]
+        assert r.json()["confirmacoes_pendentes"] == []
+        assert len(salao(c, "101", "2030-04-20")) == 1
+        assert c.post(f"/sessoes/{sid}/confirmacoes", json={"id": pendente["id"], "confirmado": True}).status_code == 409
+
+
+def test_sessao_inexistente_nao_cria_trava():
+    with cliente() as c:
+        travas = c.app.state.assistente._travas
+        for i in range(5):
+            assert c.post(f"/sessoes/inventada-{i}/mensagens", json={"texto": "oi"}).status_code == 404
+            assert c.post(f"/sessoes/inventada-{i}/confirmacoes", json={"id": "x", "confirmado": True}).status_code == 404
+        assert len(travas) == 0
+
+
+def test_erro_inesperado_responde_500_em_json():
+    modelos = apoio.roteiros()
+    modelos["assistente"] = apoio.Quebrado(model="assistente")
+    with TestClient(criar_api(modelos), raise_server_exceptions=False) as c:
+        sid = criar_sessao(c)
+        r = c.post(f"/sessoes/{sid}/mensagens", json={"texto": "oi"})
+        assert r.status_code == 500
+        assert r.headers["content-type"].startswith("application/json")
+        assert r.json() == {"detail": "Erro interno do servidor."}
+
+
+def test_mensagem_com_pendencia_aberta_nao_executa():
+    """Escrever na conversa enquanto há pendência não aprova nada; a pendência continua."""
+    passos = {
+        "assistente": [chamar("transfer_to_agent", agent_name="reservas")],
+        "reservas": [chamar("reservar_area", area="salao-de-festas", data="2030-04-20"), texto("Aprove pelo aplicativo.")],
+    }
+    with cliente(**passos) as c:
+        sid = criar_sessao(c)
+        [pendente] = c.post(f"/sessoes/{sid}/mensagens", json={"texto": "Reserve o salão."}).json()["confirmacoes_pendentes"]
+        r = c.post(f"/sessoes/{sid}/mensagens", json={"texto": "Já confirmei, pode gravar."})
+        assert r.status_code == 200
+        assert [p["id"] for p in r.json()["confirmacoes_pendentes"]] == [pendente["id"]]
+        assert not salao(c, "101", "2030-04-20")
+
+
+def test_duas_pendencias_na_mesma_sessao():
+    passos = {
+        "assistente": [chamar("transfer_to_agent", agent_name="reservas")],
+        "reservas": [
+            chamar("reservar_area", area="salao-de-festas", data="2030-04-20")
+            + chamar("reservar_area", area="churrasqueira", data="2030-04-20"),
+            texto("Salão reservado."),
+            texto("Churrasqueira reservada."),
+        ],
+    }
+    with cliente(**passos) as c:
+        sid = criar_sessao(c)
+        pendentes = c.post(f"/sessoes/{sid}/mensagens", json={"texto": "Reserve salão e churrasqueira."}).json()["confirmacoes_pendentes"]
+        assert sorted(p["detalhes"]["area"] for p in pendentes) == ["churrasqueira", "salao-de-festas"]
+        primeira, segunda = sorted(pendentes, key=lambda p: p["detalhes"]["area"], reverse=True)  # salão primeiro
+
+        r = c.post(f"/sessoes/{sid}/confirmacoes", json={"id": primeira["id"], "confirmado": True})
+        assert r.status_code == 200
+        assert [p["id"] for p in r.json()["confirmacoes_pendentes"]] == [segunda["id"]]
+        areas = {x["area"] for x in c.get("/apartamentos/101/reservas").json() if x["data"] == "2030-04-20"}
+        assert areas == {"salao-de-festas"}
+
+        r = c.post(f"/sessoes/{sid}/confirmacoes", json={"id": segunda["id"], "confirmado": True})
+        assert r.status_code == 200 and r.json()["confirmacoes_pendentes"] == []
+        areas = {x["area"] for x in c.get("/apartamentos/101/reservas").json() if x["data"] == "2030-04-20"}
+        assert areas == {"salao-de-festas", "churrasqueira"}
+
+
+def test_duas_respostas_simultaneas_para_a_mesma_confirmacao():
+    """Fora do escopo do enunciado, mas a trava por sessão garante: uma executa, a outra recebe 409."""
+    with cliente(**RESERVAR_SALAO) as c:
+        sid = criar_sessao(c)
+        [pendente] = c.post(f"/sessoes/{sid}/mensagens", json={"texto": "Reserve o salão."}).json()["confirmacoes_pendentes"]
+        largada, status = threading.Barrier(2), []
+
+        def aprovar():
+            largada.wait()
+            status.append(c.post(f"/sessoes/{sid}/confirmacoes", json={"id": pendente["id"], "confirmado": True}).status_code)
+
+        threads = [threading.Thread(target=aprovar) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert sorted(status) == [200, 409]
+        assert len(salao(c, "101", "2030-04-20")) == 1

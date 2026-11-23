@@ -32,6 +32,24 @@ class SemCota(BaseLlm):
         yield  # pragma: no cover
 
 
+class SemCotaDepois(Roteiro):
+    """Segue os passos combinados; quando eles acabam, responde 429 em vez de falhar o teste."""
+
+    async def generate_content_async(self, llm_request, stream=False):
+        if not self.passos:
+            raise errors.ClientError(429, {"error": {"code": 429, "message": "quota", "status": "RESOURCE_EXHAUSTED"}})
+        async for resposta in super().generate_content_async(llm_request, stream):
+            yield resposta
+
+
+class Quebrado(BaseLlm):
+    """Modelo que levanta um erro que não é da API do Gemini."""
+
+    async def generate_content_async(self, llm_request, stream=False):
+        raise RuntimeError("erro inesperado")
+        yield  # pragma: no cover
+
+
 def roteiros(**passos: list) -> dict[str, BaseLlm]:
     """Um Roteiro para cada agente; agente sem passos falha se for chamado."""
     return {nome: Roteiro(model=nome, passos=list(passos.get(nome, []))) for nome in AGENTES}
