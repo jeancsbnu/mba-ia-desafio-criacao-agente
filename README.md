@@ -20,6 +20,8 @@ flowchart LR
     A -->|transferência| R[reservas]
     A -->|transferência| P[portaria]
     A -->|AgentTool| G["regulamento<br/>(sessão própria em memória)"]
+    R -->|AgentTool| G
+    P -->|AgentTool| G
     R --> T1["tools de reservas"]
     P --> T2["tools de visitantes"]
     G --> T3["consultar_regulamento"]
@@ -37,7 +39,7 @@ Os agentes são montados em [`aurora/agentes.py`](aurora/agentes.py).
 | `assistente` (principal) | Entende o pedido e encaminha. Responde cumprimentos e conversa geral. Não tem tools de dados nem o regulamento nas instruções. | Raiz do `App` `residencial_aurora`. Todo turno novo começa nele ou no último especialista. | Um ponto único de entrada mantém os especialistas focados e o prompt do principal pequeno. |
 | `reservas` | Consulta disponibilidade, lista, reserva e cancela reservas do apartamento da sessão. | **Transferência** (`sub_agents` do principal). | Reservar área com taxa pede confirmação. O pedido de confirmação precisa ficar gravado **na sessão principal** e a aprovação precisa voltar para **este** agente (ver abaixo). |
 | `portaria` | Autoriza visitantes e lista as visitas autorizadas do apartamento da sessão. | **Transferência** (`sub_agents` do principal). | Mesmo motivo: autorizar visitante sempre pede confirmação. |
-| `regulamento` | Responde dúvidas lendo **um capítulo por vez** de `dados/regulamento.md`. | **`AgentTool`** do principal. | O `AgentTool` roda o especialista numa sessão própria, em memória. Só a resposta final volta para a sessão principal, então os capítulos lidos nunca entram nos eventos (Garantia 4). Ele não precisa de confirmação, então rodar fora da sessão não atrapalha. |
+| `regulamento` | Responde dúvidas lendo **um capítulo por vez** de `dados/regulamento.md`. | **`AgentTool`** do principal e também de `reservas` e `portaria` (a mesma ferramenta nos três). | O `AgentTool` roda o especialista numa sessão própria, em memória. Só a resposta final volta para a sessão principal, então os capítulos lidos nunca entram nos eventos (Garantia 4). Ele não precisa de confirmação, então rodar fora da sessão não atrapalha. Estar também nos especialistas faz uma dúvida no meio de uma reserva ou visita ser respondida direto, sem depender de uma transferência e com uma chamada ao modelo a menos. |
 
 **Por que `reservas` e `portaria` podem transferir** (sem `disallow_transfer_to_parent/peers`): no ADK 2.9.1, a aprovação de uma confirmação só é processada pelo agente que fez o pedido. O agente principal ignora confirmações pedidas por outro agente (`flows/llm_flows/request_confirmation.py`). E o Runner só entrega a aprovação ao especialista se ele for "transferível" na árvore (`agents/_agent_router.find_agent_to_run`).
 
@@ -50,7 +52,7 @@ Testamos as quatro combinações, com sessão em SQLite e o Runner recriado entr
 | não | não | perdida, sem erro: nada executa (8 de 8) |
 | não | sim | **chega ao especialista e executa uma vez** (80 de 80) |
 
-Por isso os especialistas podem transferir, de volta ao principal e entre si. O efeito colateral é que o turno seguinte do morador começa no último especialista, e as instruções mandam ele transferir quando o assunto muda. O `App` usa `ResumabilityConfig(is_resumable=True)`, o caminho do ADK 2 para pausar em chamadas longas.
+Por isso os especialistas podem transferir, de volta ao principal e entre si. O efeito colateral é que o turno seguinte do morador começa no último especialista. Dúvidas do regulamento ele mesmo responde, pela ferramenta `regulamento`; os outros assuntos ele transfere. O `App` usa `ResumabilityConfig(is_resumable=True)`, o caminho do ADK 2 para pausar em chamadas longas.
 
 ### Modelos
 
@@ -276,9 +278,17 @@ def inicializar() -> None:
 
 **Onde:** [`aurora/agentes.py`](aurora/agentes.py) (`AgentTool` e instruções), [`aurora/regulamento.py`](aurora/regulamento.py) e [`aurora/tools.py`](aurora/tools.py) (`consultar_regulamento`).
 
-O especialista do regulamento é um `AgentTool` do principal:
+O especialista do regulamento vira uma ferramenta (`AgentTool`):
 
-[`aurora/agentes.py`](aurora/agentes.py#L68-L75)
+[`aurora/agentes.py`](aurora/agentes.py#L56-L57)
+```python
+    # A mesma ferramenta nos três agentes: o AgentTool não amarra o especialista a um pai.
+    consulta_regulamento = AgentTool(agent=especialista_regulamento)
+```
+
+Essa mesma ferramenta entra nas tools do principal e dos especialistas:
+
+[`aurora/agentes.py`](aurora/agentes.py#L73-L80)
 ```python
     assistente = LlmAgent(
         name="assistente",
@@ -286,7 +296,7 @@ O especialista do regulamento é um `AgentTool` do principal:
         description="Assistente virtual do Residencial Aurora.",
         instruction=_instrucao_assistente,
         sub_agents=[reservas, portaria],
-        tools=[AgentTool(agent=especialista_regulamento)],
+        tools=[consulta_regulamento],
     )
 ```
 
@@ -304,7 +314,7 @@ A tool devolve um único capítulo:
 **Por que não depende do modelo:**
 - O `AgentTool` do ADK roda o especialista com um `InMemorySessionService` próprio (`tools/agent_tool.py`). As chamadas a `consultar_regulamento` e os capítulos lidos ficam nessa sessão descartável. Na sessão do morador entra só a pergunta enviada ao especialista e a resposta final dele.
   - Mesmo que o especialista leia um capítulo errado, esse texto não chega aos eventos da sessão.
-- As instruções do principal ([`_instrucao_assistente`](aurora/agentes.py#L87-L101)) não têm nenhum trecho do regulamento. Só o especialista recebe o **índice** (os títulos dos 14 capítulos).
+- As instruções do principal ([`_instrucao_assistente`](aurora/agentes.py#L92-L106)) não têm nenhum trecho do regulamento, e as de `reservas` e `portaria` também não. Só o especialista do regulamento recebe o **índice** (os títulos dos 14 capítulos).
 - Cada leitura traz um capítulo (o da piscina tem cerca de 3,5 mil caracteres, de 43 mil), e o regulamento nunca passa a acompanhar as mensagens seguintes.
 
 ### Garantia 5: dois moradores, uma reserva
@@ -436,7 +446,7 @@ Os testes rodam em segundos e **não chamam o Gemini**: cada agente recebe um LL
 |---|---|
 | [`tests/test_condominio.py`](tests/test_condominio.py) | Estado inicial, isolamento entre apartamentos, códigos que não se repetem, restauração e 20 threads disputando a mesma reserva (G5) |
 | [`tests/test_tools.py`](tests/test_tools.py) | Nenhuma tool recebe apartamento (G2); confirmação por taxa e de visitante (G1); data ocupada sem vazar dono; um capítulo por vez (G4) |
-| [`tests/test_agentes.py`](tests/test_agentes.py) | Runner do ADK com sessão em SQLite e reinício entre o pedido e a resposta: negar, aprovar, "já estou confirmando aqui", regulamento fora dos eventos e a matriz retomável × transferível |
+| [`tests/test_agentes.py`](tests/test_agentes.py) | Runner do ADK com sessão em SQLite e reinício entre o pedido e a resposta: negar, aprovar, "já estou confirmando aqui", regulamento fora dos eventos (inclusive consultado direto pela `portaria`, como nos passos 11 e 12) e a matriz retomável × transferível |
 | [`tests/test_api.py`](tests/test_api.py) | Contrato: `201`, `404`, `409` (repetido, inexistente, de outra sessão), `422`, `503`, `500` em JSON, eventos após recriar a API e aprovações simultâneas (passo 14). Também: modelo que falha depois da aprovação (`200` com a mensagem da ação), mensagem com pendência aberta, duas pendências na mesma sessão e duas respostas simultâneas para a mesma confirmação |
 | [`tests/test_modelos.py`](tests/test_modelos.py) | Cadeia de modelos: troca em 429/503, pausa, tempo limite, 429 sem repetir no mesmo modelo, erros que propagam |
 | [`tests/test_readme.py`](tests/test_readme.py) | Cada trecho da seção Garantias bate com as linhas do arquivo citado |
