@@ -45,7 +45,7 @@ Os agentes são montados em [`aurora/agentes.py`](aurora/agentes.py).
 
 **Por que `reservas` e `portaria` podem transferir** (sem `disallow_transfer_to_parent/peers`): no ADK 2.9.1, a aprovação de uma confirmação só é processada pelo agente que fez o pedido. O agente principal ignora confirmações pedidas por outro agente (`flows/llm_flows/request_confirmation.py`). E o Runner só entrega a aprovação ao especialista se ele for "transferível" na árvore (`agents/_agent_router.find_agent_to_run`).
 
-Testamos as quatro combinações, com sessão em SQLite e o Runner recriado entre o pedido e a aprovação:
+Testamos as quatro combinações, com sessão em SQLite e o Runner recriado entre o pedido e a aprovação. As contagens abaixo vêm de execuções repetidas do teste com LLM roteirizado (`tests/test_agentes.py`, rodado várias vezes à mão); a suíte automática cobre os três casos determinísticos:
 
 | App retomável | Especialistas podem transferir | Aprovação |
 |---|---|---|
@@ -179,7 +179,7 @@ As pendências saem dos eventos gravados. Um pedido deixa de estar pendente assi
                 continue
 ```
 
-[`aurora/api.py`](aurora/api.py#L149-L153)
+[`aurora/api.py`](aurora/api.py#L148-L152)
 ```python
     @api.exception_handler(ConfirmacaoInexistente)
     async def confirmacao_inexistente(request: Request, e: ConfirmacaoInexistente) -> JSONResponse:
@@ -392,6 +392,8 @@ Preencha o `.env`:
 | `AURORA_PORTA` | não | porta da API (padrão `8000`) |
 | `AURORA_HOST` | não | endereço em que a API escuta (padrão `127.0.0.1`; use `0.0.0.0` para acessar de fora da máquina, como de um WSL ou contêiner) |
 
+Uma variável já definida no terminal tem prioridade sobre o `.env`, a menos que esteja vazia. Se a sua `GOOGLE_API_KEY` estiver exportada no shell com outra chave, é essa que vale. Se a chave faltar, a API avisa no log ao subir. Se o modelo recusar a chave, as mensagens respondem `503` com o código do erro e a dica de conferir a chave.
+
 Instale as dependências:
 
 ```bash
@@ -422,7 +424,9 @@ Na primeira subida, se `var/condominio.db` ainda não existe, a API carrega o es
 uv run python -m aurora
 ```
 
-A API sobe em `http://localhost:8000`. Ela escuta em `127.0.0.1`, ou seja, só na própria máquina e por IPv4; clientes como o `curl` resolvem `localhost` para esse endereço. Para acessar de fora, defina `AURORA_HOST=0.0.0.0`. Ctrl+C para parar. Subir de novo com o mesmo comando mantém sessões, eventos, reservas e visitantes.
+A API sobe em `http://localhost:8000`. Ela escuta em `127.0.0.1`, ou seja, só na própria máquina e por IPv4; clientes como o `curl` resolvem `localhost` para esse endereço. Para acessar de fora, defina `AURORA_HOST=0.0.0.0`. Ctrl+C para parar.
+
+Cada mensagem leva de alguns segundos a, às vezes, mais de um minuto, porque o modelo pode demorar ou a cadeia pode trocar de modelo. Não use um tempo limite curto no cliente HTTP. Subir de novo com o mesmo comando mantém sessões, eventos, reservas e visitantes.
 
 ### Rotas
 

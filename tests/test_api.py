@@ -283,3 +283,19 @@ def test_post_sem_content_type_json_funciona():
         [pendente] = r.json()["confirmacoes_pendentes"]
         r = post(c, f"/sessoes/{sid}/confirmacoes", {"id": pendente["id"], "confirmado": True}, None)
         assert r.status_code == 200 and len(salao(c, "101", "2030-04-20")) == 1
+
+
+def test_modelo_que_recusa_a_chave_responde_503_com_dica():
+    from google.genai import errors
+
+    class ChaveRecusada(apoio.Roteiro):
+        async def generate_content_async(self, llm_request, stream=False):
+            raise errors.ClientError(400, {"error": {"code": 400, "message": "API key not valid", "status": "INVALID_ARGUMENT"}})
+            yield  # pragma: no cover
+
+    modelos = {nome: ChaveRecusada(model=nome) for nome in apoio.AGENTES}
+    with TestClient(criar_api(modelos)) as c:
+        sid = criar_sessao(c)
+        r = c.post(f"/sessoes/{sid}/mensagens", json={"texto": "oi"})
+        assert r.status_code == 503
+        assert "erro 400" in r.json()["detail"] and "GOOGLE_API_KEY" in r.json()["detail"]
