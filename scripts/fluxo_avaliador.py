@@ -27,6 +27,8 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
+# ✔ e ✘ na saída: sem isso, um console ou arquivo em cp1252 no Windows pode quebrar a impressão.
+sys.stdout.reconfigure(encoding="utf-8")
 
 from aurora import regulamento  # noqa: E402
 
@@ -160,10 +162,10 @@ def passos_1_a_12() -> tuple[str, int]:
     checar(re.search(r"20\s*h|20:00|vinte horas", resp) is not None, "P12 resposta traz 20h")
     lista = eventos(s1)
     tools = {
-        parte["function_call"]["name"]
+        parte["functionCall"]["name"]
         for e in lista
         for parte in (e.get("content") or {}).get("parts", [])
-        if "function_call" in parte
+        if "functionCall" in parte
     }
     checar({"cancelar_reserva", "reservar_area", "autorizar_visitante"} <= tools, f"P12 eventos com chamadas de tool ({len(tools)} tipos)")
     texto = json.dumps(lista, ensure_ascii=False)

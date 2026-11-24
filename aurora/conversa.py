@@ -66,6 +66,8 @@ class Assistente:
 
     async def fechar(self) -> None:
         await self.runner.close()
+        # O Runner só descarrega o serviço de sessões; as conexões com o SQLite fecham aqui.
+        await self.sessoes.close()
 
     async def criar_sessao(self, apartamento: str) -> str:
         # O apartamento vira o user_id da sessão: é dele que as tools leem (Garantia 2).
@@ -130,12 +132,17 @@ class Assistente:
                 raise
             logger.warning("O modelo falhou depois de uma tool executar; respondendo com a mensagem da tool.")
             textos.append(mensagem)
-        pendentes = confirmacoes_pendentes((await self._sessao(sessao.id)).events)
+        eventos = (await self._sessao(sessao.id)).events
+        pendentes = confirmacoes_pendentes(eventos)
 
         resposta = "\n\n".join(textos).strip()
         if not resposta and pendentes:
             # A execução parou no pedido de confirmação, sem texto do modelo.
             resposta = "Aguardando sua aprovação no aplicativo: " + " ".join(p.descricao for p in pendentes)
+        elif not resposta:
+            # O modelo terminou sem texto (acontece às vezes depois de uma tool):
+            # a mensagem da própria tool vale como resposta.
+            resposta = _mensagem_da_ultima_tool(eventos[eventos_antes:]) or ""
         return Resultado(resposta, pendentes)
 
 

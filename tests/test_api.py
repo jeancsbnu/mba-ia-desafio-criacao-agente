@@ -235,3 +235,25 @@ def test_duas_respostas_simultaneas_para_a_mesma_confirmacao():
             t.join()
         assert sorted(status) == [200, 409]
         assert len(salao(c, "101", "2030-04-20")) == 1
+
+
+def test_eventos_saem_em_camel_case_como_no_servidor_do_adk():
+    with cliente(**RESERVAR_SALAO) as c:
+        sid = criar_sessao(c)
+        c.post(f"/sessoes/{sid}/mensagens", json={"texto": "Reserve o salão."})
+        texto = c.get(f"/sessoes/{sid}/eventos").text
+        assert '"invocationId"' in texto and '"functionCall"' in texto
+        assert '"invocation_id"' not in texto and '"function_call"' not in texto
+
+
+def test_modelo_sem_texto_usa_a_resposta_da_ferramenta():
+    """Passo 12: se o modelo terminar sem texto depois de consultar o regulamento, a resposta não sai vazia."""
+    passos = {
+        "assistente": [chamar("regulamento", request="Até que horas a piscina funciona aos domingos?"), texto("")],
+        "regulamento": [chamar("consultar_regulamento", capitulo="IV"), texto("Aos domingos, das 9h às 20h.")],
+    }
+    with cliente(**passos) as c:
+        sid = criar_sessao(c)
+        r = c.post(f"/sessoes/{sid}/mensagens", json={"texto": "Até que horas a piscina funciona aos domingos?"})
+        assert r.status_code == 200
+        assert r.json() == {"resposta": "Aos domingos, das 9h às 20h.", "confirmacoes_pendentes": []}
