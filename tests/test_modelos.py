@@ -18,7 +18,12 @@ class Falso(Gemini):
         chamados.append(llm_request.model)
         if self.model == "lento":
             await asyncio.sleep(5)
-        erros = {"cota": (errors.ClientError, 429), "cheio": (errors.ServerError, 503), "ruim": (errors.ClientError, 400)}
+        erros = {
+            "cota": (errors.ClientError, 429),
+            "cheio": (errors.ServerError, 503),
+            "ruim": (errors.ClientError, 400),
+            "proibido": (errors.ClientError, 403),
+        }
         if self.model in erros:
             classe, codigo = erros[self.model]
             raise classe(codigo, {"error": {"code": codigo, "message": self.model, "status": "X"}})
@@ -132,3 +137,9 @@ def test_gemini_2_recebe_o_historico_como_esta():
     original = historico_com_chamadas()
     [enviado] = enviar_historico("gemini-2.5-flash", original)
     assert enviado.parts[0].thought_signature is None
+
+
+def test_403_troca_de_modelo():
+    """403: o modelo não está liberado para esta chave; o próximo da cadeia pode estar."""
+    assert pedir("proibido", "bom") == ["resposta de bom"]
+    assert chamados == ["proibido", "bom"]

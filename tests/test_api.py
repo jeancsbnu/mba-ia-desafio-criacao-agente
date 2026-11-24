@@ -264,3 +264,22 @@ def test_mensagem_so_com_espacos_responde_422():
         sid = criar_sessao(c)
         assert c.post(f"/sessoes/{sid}/mensagens", json={"texto": "   "}).status_code == 422
         assert c.post(f"/sessoes/{sid}/mensagens", json={"texto": ""}).status_code == 422
+
+
+def test_post_sem_content_type_json_funciona():
+    """Um `curl -d '{...}'` sem `-H` manda form-urlencoded; o corpo é lido como JSON mesmo assim."""
+    import json
+
+    def post(c, caminho, corpo, tipo):
+        cabecalhos = {"content-type": tipo} if tipo else {}
+        return c.post(caminho, content=json.dumps(corpo), headers=cabecalhos)
+
+    with cliente(**RESERVAR_SALAO) as c:
+        for tipo in (None, "application/x-www-form-urlencoded", "text/plain"):
+            assert post(c, "/sessoes", {"apartamento": "101"}, tipo).status_code == 201, tipo
+        sid = post(c, "/sessoes", {"apartamento": "101"}, "application/x-www-form-urlencoded").json()["session_id"]
+        r = post(c, f"/sessoes/{sid}/mensagens", {"texto": "Reserve o salão."}, "application/x-www-form-urlencoded")
+        assert r.status_code == 200
+        [pendente] = r.json()["confirmacoes_pendentes"]
+        r = post(c, f"/sessoes/{sid}/confirmacoes", {"id": pendente["id"], "confirmado": True}, None)
+        assert r.status_code == 200 and len(salao(c, "101", "2030-04-20")) == 1

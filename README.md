@@ -41,6 +41,8 @@ Os agentes são montados em [`aurora/agentes.py`](aurora/agentes.py).
 | `portaria` | Autoriza visitantes e lista as visitas autorizadas do apartamento da sessão. | **Transferência** (`sub_agents` do principal). | Mesmo motivo: autorizar visitante sempre pede confirmação. |
 | `regulamento` | Responde dúvidas lendo **um capítulo por vez** de `dados/regulamento.md`. | **`AgentTool`** do principal e também de `reservas` e `portaria` (a mesma ferramenta nos três). | O `AgentTool` roda o especialista numa sessão própria, em memória. Só a resposta final volta para a sessão principal, então os capítulos lidos nunca entram nos eventos (Garantia 4). Ele não precisa de confirmação, então rodar fora da sessão não atrapalha. Estar também nos especialistas faz uma dúvida no meio de uma reserva ou visita ser respondida direto, sem depender de uma transferência e com uma chamada ao modelo a menos. |
 
+**Por que `AgentTool`, e não `mode='single_turn'`:** a documentação do `AgentTool` no ADK 2.9.1 (`tools/agent_tool.py`) recomenda, em vez dele, marcar o sub-agente com `mode='single_turn'`. Mas esse modo roda o sub-agente "inline na sessão do pai", e então os capítulos lidos entrariam nos eventos da sessão do morador, furando a Garantia 4. O `AgentTool` roda numa sessão em memória separada, e só a resposta final volta.
+
 **Por que `reservas` e `portaria` podem transferir** (sem `disallow_transfer_to_parent/peers`): no ADK 2.9.1, a aprovação de uma confirmação só é processada pelo agente que fez o pedido. O agente principal ignora confirmações pedidas por outro agente (`flows/llm_flows/request_confirmation.py`). E o Runner só entrega a aprovação ao especialista se ele for "transferível" na árvore (`agents/_agent_router.find_agent_to_run`).
 
 Testamos as quatro combinações, com sessão em SQLite e o Runner recriado entre o pedido e a aprovação:
@@ -258,7 +260,7 @@ Cancelar a reserva de outro apartamento responde exatamente como uma reserva ine
 ```python
     def __init__(self, modelos: Mapping[str, BaseLlm] | None = None):
         url = f"sqlite+aiosqlite:///{config.BANCO_SESSOES.as_posix()}"
-        self.sessoes = DatabaseSessionService(db_url=url)
+        self.sessoes = DatabaseSessionService(db_url=url, connect_args={"timeout": 30})  # espera o lock do SQLite
         self.runner = Runner(app=construir_app(modelos), session_service=self.sessoes)
 ```
 
@@ -388,6 +390,7 @@ Preencha o `.env`:
 | `GOOGLE_API_KEY` | sim | chave do Google AI Studio (o projeto usa o AI Studio, não o Vertex AI) |
 | `AURORA_MODELOS` | não | modelos Gemini em ordem de preferência, separados por vírgula. Padrão: `gemini-3.6-flash,gemini-3.5-flash,gemini-2.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite` |
 | `AURORA_PORTA` | não | porta da API (padrão `8000`) |
+| `AURORA_HOST` | não | endereço em que a API escuta (padrão `127.0.0.1`; use `0.0.0.0` para acessar de fora da máquina, como de um WSL ou contêiner) |
 
 Instale as dependências:
 
@@ -419,7 +422,7 @@ Na primeira subida, se `var/condominio.db` ainda não existe, a API carrega o es
 uv run python -m aurora
 ```
 
-A API sobe em `http://localhost:8000`. Ela escuta em `127.0.0.1`, ou seja, só na própria máquina e por IPv4; clientes como o `curl` resolvem `localhost` para esse endereço. Ctrl+C para parar. Subir de novo com o mesmo comando mantém sessões, eventos, reservas e visitantes.
+A API sobe em `http://localhost:8000`. Ela escuta em `127.0.0.1`, ou seja, só na própria máquina e por IPv4; clientes como o `curl` resolvem `localhost` para esse endereço. Para acessar de fora, defina `AURORA_HOST=0.0.0.0`. Ctrl+C para parar. Subir de novo com o mesmo comando mantém sessões, eventos, reservas e visitantes.
 
 ### Rotas
 
@@ -432,9 +435,11 @@ A API sobe em `http://localhost:8000`. Ela escuta em `127.0.0.1`, ou seja, só n
 | `GET /apartamentos/{numero}/reservas` | `[{"codigo", "area", "data"}]` |
 | `GET /apartamentos/{numero}/visitantes` | `[{"nome", "data"}]` |
 
+O corpo de todo POST é lido como JSON, com ou sem o cabeçalho `Content-Type: application/json`. Assim, um `curl -d '{...}'` sem `-H` também funciona.
+
 As rotas com `{session_id}` respondem `404` quando a sessão não existe. A criação de sessão responde `422` para um apartamento que não está em `dados/apartamentos.json`.
 
-Se todos os modelos da cadeia falharem, as rotas de conversa respondem `503` e nada é executado. Há uma exceção: se uma ação já tiver executado antes da falha, a resposta é `200`. Por exemplo, a aprovação gravou a reserva e só o resumo do modelo não veio. A `resposta` traz então a mensagem da própria ação, porque um `503` levaria o morador a repetir o pedido. Erros inesperados respondem `500` em JSON.
+Se todos os modelos da cadeia falharem, as rotas de conversa respondem `503` e nada é executado. Por isso, reenviar a mesma mensagem depois de um `503` é seguro. Há uma exceção: se uma ação já tiver executado antes da falha, a resposta é `200`. Por exemplo, a aprovação gravou a reserva e só o resumo do modelo não veio. A `resposta` traz então a mensagem da própria ação, porque um `503` levaria o morador a repetir o pedido. Erros inesperados respondem `500` em JSON.
 
 Com a API no ar, `http://localhost:8000/docs` abre uma tela interativa (Swagger) para chamar cada rota pelo navegador.
 
