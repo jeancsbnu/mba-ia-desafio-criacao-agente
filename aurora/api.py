@@ -35,7 +35,7 @@ class SessaoCriada(BaseModel):
 
 
 class Mensagem(BaseModel):
-    texto: str = Field(min_length=1)
+    texto: str = Field(min_length=1, pattern=r"\S")  # pelo menos um caractere que não seja espaço
 
 
 class RespostaDeConfirmacao(BaseModel):

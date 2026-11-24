@@ -225,3 +225,12 @@ def test_construir_app_usa_a_topologia_documentada():
     for especialista in principal.sub_agents:
         assert not especialista.disallow_transfer_to_parent and not especialista.disallow_transfer_to_peers
         assert "regulamento" in [getattr(t, "name", None) for t in especialista.tools]
+
+
+def test_especialistas_chamam_a_ferramenta_de_novo_em_pedido_repetido():
+    """Reforço do passo 8: pedido repetido (ou refeito depois de recusa) volta à ferramenta."""
+    app = construir_app(apoio.roteiros())
+    contexto = type("Contexto", (), {"user_id": "101"})()  # as instruções só leem o user_id
+    for especialista in app.root_agent.sub_agents:
+        instrucao = especialista.instruction(contexto)
+        assert "Todo pedido é novo" in instrucao and "chame a ferramenta outra vez" in instrucao

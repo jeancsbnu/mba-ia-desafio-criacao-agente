@@ -257,3 +257,10 @@ def test_modelo_sem_texto_usa_a_resposta_da_ferramenta():
         r = c.post(f"/sessoes/{sid}/mensagens", json={"texto": "Até que horas a piscina funciona aos domingos?"})
         assert r.status_code == 200
         assert r.json() == {"resposta": "Aos domingos, das 9h às 20h.", "confirmacoes_pendentes": []}
+
+
+def test_mensagem_so_com_espacos_responde_422():
+    with cliente() as c:
+        sid = criar_sessao(c)
+        assert c.post(f"/sessoes/{sid}/mensagens", json={"texto": "   "}).status_code == 422
+        assert c.post(f"/sessoes/{sid}/mensagens", json={"texto": ""}).status_code == 422

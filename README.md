@@ -88,6 +88,8 @@ Os arquivos de `dados/` são só o estado inicial e não são alterados. O que o
 - `var/condominio.db`: reservas, visitantes, códigos emitidos e o vínculo entre sessão e apartamento.
 - `var/sessoes.db`: sessões e eventos do ADK.
 
+A pasta pode ser trocada pela variável de ambiente `AURORA_VAR_DIR`, definida no terminal e não no `.env`, porque ela é lida antes do `.env`. É assim que o script do fluxo do avaliador roda sem mexer em `var/`.
+
 ---
 
 ## Garantias
@@ -417,7 +419,7 @@ Na primeira subida, se `var/condominio.db` ainda não existe, a API carrega o es
 uv run python -m aurora
 ```
 
-A API sobe em `http://localhost:8000`. Ctrl+C para parar. Subir de novo com o mesmo comando mantém sessões, eventos, reservas e visitantes.
+A API sobe em `http://localhost:8000`. Ela escuta em `127.0.0.1`, ou seja, só na própria máquina e por IPv4; clientes como o `curl` resolvem `localhost` para esse endereço. Ctrl+C para parar. Subir de novo com o mesmo comando mantém sessões, eventos, reservas e visitantes.
 
 ### Rotas
 
