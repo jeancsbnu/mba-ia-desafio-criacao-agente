@@ -160,6 +160,41 @@ def test_regulamento_nao_entra_nos_eventos_da_sessao():
     asyncio.run(cenario())
 
 
+def test_especialista_consulta_o_regulamento_sem_transferir():
+    """Passos 11 e 12: depois de aprovar um visitante, o último agente é a portaria;
+    a dúvida sobre a piscina sai dela direto, pelo AgentTool, sem depender de transferir."""
+
+    async def cenario():
+        api = Api(
+            assistente=[chamar("transfer_to_agent", agent_name="portaria")],
+            portaria=[
+                chamar("autorizar_visitante", nome="Joana Ribeiro", data="2030-04-21"),
+                texto("Entrada liberada."),
+                chamar("regulamento", request="Até que horas a piscina funciona aos domingos?"),
+                texto("Aos domingos, até as 20h."),
+            ],
+            regulamento=[chamar("consultar_regulamento", capitulo="IV"), texto("Das 9h às 20h (Art. 22, II).")],
+        )
+        sid = await api.criar()
+        [pedido] = pedidos_de_confirmacao(await api.enviar(sid, mensagem("Libera a Joana Ribeiro em 2030-04-21.")))
+        await api.enviar(sid, resposta_confirmacao(pedido["id"], True))
+
+        apoio.CHAMADAS.clear()
+        eventos = await api.enviar(sid, mensagem("Até que horas a piscina funciona aos domingos?"))
+        assert apoio.CHAMADAS == ["portaria", "regulamento", "regulamento", "portaria"]
+        assert "transfer_to_agent" not in {fc.name for e in eventos for fc in e.get_function_calls()}
+        assert "20h" in " ".join(p.text for e in eventos if e.content for p in e.content.parts if p.text)
+
+        tudo = json.dumps([e.model_dump(mode="json") for e in await api.eventos(sid)], ensure_ascii=False)
+        assert "consultar_regulamento" not in tudo
+        for capitulo in regulamento.capitulos().values():
+            for paragrafo in capitulo.texto.split("\n\n")[1:]:
+                assert paragrafo[:70] not in tudo
+        await api.fechar()
+
+    asyncio.run(cenario())
+
+
 def test_sessao_continua_depois_do_reinicio():
     """G3: mesmos eventos depois de recriar tudo, e uma mensagem nova funciona."""
 
@@ -189,3 +224,4 @@ def test_construir_app_usa_a_topologia_documentada():
     assert app.resumability_config.is_resumable
     for especialista in principal.sub_agents:
         assert not especialista.disallow_transfer_to_parent and not especialista.disallow_transfer_to_peers
+        assert "regulamento" in [getattr(t, "name", None) for t in especialista.tools]

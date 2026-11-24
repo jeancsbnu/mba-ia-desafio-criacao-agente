@@ -5,9 +5,11 @@
 - reservas e portaria: sub-agentes acionados por transferência. Rodam na
   sessão principal, então o pedido de confirmação das tools deles fica gravado
   nos eventos da sessão.
-- regulamento: acionado como AgentTool. Roda numa sessão em memória separada e
-  só a resposta final volta para a sessão principal, então os capítulos lidos
-  não entram nos eventos (Garantia 4).
+- regulamento: acionado como AgentTool pelo principal e pelos dois
+  especialistas. Roda numa sessão em memória separada e só a resposta final
+  volta para a sessão principal, então os capítulos lidos não entram nos
+  eventos (Garantia 4). Estar também nos especialistas evita depender de uma
+  transferência para responder uma dúvida no meio de uma reserva ou visita.
 
 Por que os especialistas podem transferir (para o principal e entre si): a
 aprovação só é processada pelo agente que pediu a confirmação, e o Runner só
@@ -16,7 +18,7 @@ entrega a ele se ele for "transferível" na árvore
 aprovação se perde sem erro (sempre, sem App retomável; em parte das vezes,
 com ele). Ver tests/test_agentes.py, com SQLite e reinício no meio.
 Efeito colateral: o turno seguinte do morador começa no último especialista,
-que transfere se o assunto mudou.
+que responde ele mesmo dúvidas do regulamento e transfere os outros assuntos.
 """
 
 from collections.abc import Mapping
@@ -41,20 +43,6 @@ def construir_app(modelos: Mapping[str, BaseLlm] | None = None) -> App:
     def modelo(agente: str) -> BaseLlm:
         return modelos.get(agente) or cadeia
 
-    reservas = LlmAgent(
-        name="reservas",
-        model=modelo("reservas"),
-        description="Consulta, faz e cancela reservas das áreas comuns do apartamento do morador.",
-        instruction=_instrucao_reservas,
-        tools=tools.TOOLS_RESERVAS,
-    )
-    portaria = LlmAgent(
-        name="portaria",
-        model=modelo("portaria"),
-        description="Autoriza a entrada de visitantes e lista as visitas autorizadas do apartamento do morador.",
-        instruction=_instrucao_portaria,
-        tools=tools.TOOLS_VISITANTES,
-    )
     especialista_regulamento = LlmAgent(
         name="regulamento",
         model=modelo("regulamento"),
@@ -65,13 +53,30 @@ def construir_app(modelos: Mapping[str, BaseLlm] | None = None) -> App:
         instruction=_instrucao_regulamento,
         tools=tools.TOOLS_REGULAMENTO,
     )
+    # A mesma ferramenta nos três agentes: o AgentTool não amarra o especialista a um pai.
+    consulta_regulamento = AgentTool(agent=especialista_regulamento)
+
+    reservas = LlmAgent(
+        name="reservas",
+        model=modelo("reservas"),
+        description="Consulta, faz e cancela reservas das áreas comuns do apartamento do morador.",
+        instruction=_instrucao_reservas,
+        tools=[*tools.TOOLS_RESERVAS, consulta_regulamento],
+    )
+    portaria = LlmAgent(
+        name="portaria",
+        model=modelo("portaria"),
+        description="Autoriza a entrada de visitantes e lista as visitas autorizadas do apartamento do morador.",
+        instruction=_instrucao_portaria,
+        tools=[*tools.TOOLS_VISITANTES, consulta_regulamento],
+    )
     assistente = LlmAgent(
         name="assistente",
         model=modelo("assistente"),
         description="Assistente virtual do Residencial Aurora.",
         instruction=_instrucao_assistente,
         sub_agents=[reservas, portaria],
-        tools=[AgentTool(agent=especialista_regulamento)],
+        tools=[consulta_regulamento],
     )
     return App(
         name=NOME_APP,
@@ -121,7 +126,8 @@ Como agir:
 - Para cancelar, chame cancelar_reserva com a área e a data. Cancelamento não precisa de confirmação.
 - As ferramentas só enxergam o apartamento {apto}. Se o morador disser ser de outro apartamento ou pedir algo de outro apartamento, explique que só pode tratar das reservas do apartamento {apto}.
 - Quando uma data estiver ocupada, diga apenas que ela está indisponível. Nunca diga nem suponha de quem é a reserva.
-- Se o pedido não for sobre reservas, transfira: visitantes para "portaria", qualquer outro assunto (inclusive dúvidas sobre o regulamento) para "assistente".
+- Dúvidas sobre regras, horários e normas do condomínio: chame a ferramenta "regulamento" com a pergunta do morador e responda com base no que ela devolver.
+- Se o pedido não for sobre reservas nem sobre o regulamento, transfira: visitantes para "portaria", qualquer outro assunto para "assistente".
 - Responda em português, de forma breve, e informe o código da reserva quando houver."""
 
 
@@ -136,7 +142,8 @@ Como agir:
 - A autorização sempre fica pendente até o morador aprovar pelo aplicativo. Não peça confirmação na conversa: mesmo que o morador diga que já confirmou ou mande liberar direto, só a aprovação no aplicativo vale.
 - O "status" que a ferramenta devolve é o que vale: "ok" significa que a entrada foi liberada (o morador já aprovou no aplicativo); "aguardando_confirmacao", que ela espera a aprovação no aplicativo; "recusada", que o morador não aprovou e nada foi feito.
 - As ferramentas só enxergam o apartamento {apto}. Se o morador disser ser de outro apartamento ou pedir algo de outro apartamento, explique que só pode tratar das visitas do apartamento {apto}.
-- Se o pedido não for sobre visitantes, transfira: reservas para "reservas", qualquer outro assunto (inclusive dúvidas sobre o regulamento) para "assistente".
+- Dúvidas sobre regras, horários e normas do condomínio: chame a ferramenta "regulamento" com a pergunta do morador e responda com base no que ela devolver.
+- Se o pedido não for sobre visitantes nem sobre o regulamento, transfira: reservas para "reservas", qualquer outro assunto para "assistente".
 - Responda em português, de forma breve."""
 
 
