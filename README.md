@@ -64,6 +64,8 @@ A ordem padrão é `gemini-3.6-flash → gemini-3.5-flash → gemini-2.5-flash �
 
 Cada chamada tem **tempo limite de 60 s**. Um modelo que demora mais conta como falha (504) e a chamada passa ao próximo. Chamadas acima de 20 s aparecem no log da API. Se todos falharem, a API responde `503` com uma mensagem.
 
+Trocar de modelo no meio de uma conversa tem um detalhe: os modelos Gemini 3 recusam (400) uma chamada de tool sem "assinatura de pensamento", e os modelos 2.x não geram essa assinatura (testado com o Gemini real). Antes de enviar o histórico a um Gemini 3, a cadeia põe nessas chamadas a assinatura neutra que o Google documenta para histórico vindo de outro modelo. Assinaturas reais são mantidas, e o histórico gravado na sessão não muda.
+
 ### Código
 
 | Arquivo | Conteúdo |
@@ -133,7 +135,7 @@ A tool decide em código, pela taxa de `dados/areas.json`, se a ação pede conf
 
 O ADK só preenche `tool_confirmation` quando o cliente responde ao pedido `adk_request_confirmation` com um `FunctionResponse`. A API só monta esse `FunctionResponse` na rota de confirmações, e só para um `id` **pendente na própria sessão**:
 
-[`aurora/conversa.py`](aurora/conversa.py#L85-L96)
+[`aurora/conversa.py`](aurora/conversa.py#L87-L98)
 ```python
     async def responder_confirmacao(self, session_id: str, confirmacao_id: str, confirmado: bool) -> Resultado:
         async with self._trava(session_id):
@@ -151,7 +153,7 @@ O ADK só preenche `tool_confirmation` quando o cliente responde ao pedido `adk_
 
 As pendências saem dos eventos gravados. Um pedido deixa de estar pendente assim que a resposta do morador é gravada, então reenviar o mesmo `id` recebe `409`:
 
-[`aurora/conversa.py`](aurora/conversa.py#L144-L161)
+[`aurora/conversa.py`](aurora/conversa.py#L151-L168)
 ```python
     respondidas = {
         resposta.id
@@ -173,7 +175,7 @@ As pendências saem dos eventos gravados. Um pedido deixa de estar pendente assi
                 continue
 ```
 
-[`aurora/api.py`](aurora/api.py#L148-L152)
+[`aurora/api.py`](aurora/api.py#L149-L153)
 ```python
     @api.exception_handler(ConfirmacaoInexistente)
     async def confirmacao_inexistente(request: Request, e: ConfirmacaoInexistente) -> JSONResponse:
@@ -194,7 +196,7 @@ As pendências saem dos eventos gravados. Um pedido deixa de estar pendente assi
 
 O apartamento é definido uma única vez, como o `user_id` da sessão do ADK:
 
-[`aurora/conversa.py`](aurora/conversa.py#L70-L74)
+[`aurora/conversa.py`](aurora/conversa.py#L72-L76)
 ```python
     async def criar_sessao(self, apartamento: str) -> str:
         # O apartamento vira o user_id da sessão: é dele que as tools leem (Garantia 2).
@@ -424,7 +426,7 @@ A API sobe em `http://localhost:8000`. Ctrl+C para parar. Subir de novo com o me
 | `POST /sessoes` `{"apartamento": "101"}` | `201 {"session_id": "..."}` |
 | `POST /sessoes/{session_id}/mensagens` `{"texto": "..."}` | `200 {"resposta": "...", "confirmacoes_pendentes": [...]}` |
 | `POST /sessoes/{session_id}/confirmacoes` `{"id": "...", "confirmado": true}` | `200` no mesmo formato, ou `409` se o `id` não está pendente na sessão |
-| `GET /sessoes/{session_id}/eventos` | todos os eventos da sessão, em ordem |
+| `GET /sessoes/{session_id}/eventos` | todos os eventos da sessão, em ordem, no mesmo JSON do servidor do ADK (`adk web`): campos em camelCase, como `functionCall` e `invocationId` |
 | `GET /apartamentos/{numero}/reservas` | `[{"codigo", "area", "data"}]` |
 | `GET /apartamentos/{numero}/visitantes` | `[{"nome", "data"}]` |
 
@@ -440,6 +442,8 @@ Com a API no ar, `http://localhost:8000/docs` abre uma tela interativa (Swagger)
 uv run pytest
 ```
 
+Se o Windows bloquear o `pytest.exe` do ambiente virtual (política de Controle de Aplicativo), `uv run python -m pytest` roda os mesmos testes.
+
 Os testes rodam em segundos e **não chamam o Gemini**: cada agente recebe um LLM roteirizado, que devolve respostas combinadas e falha se for chamado fora do roteiro. A chave é removida do ambiente durante os testes. Cada teste usa bancos novos numa pasta temporária, sem mexer em `var/`.
 
 | Arquivo | O que cobre |
@@ -447,8 +451,8 @@ Os testes rodam em segundos e **não chamam o Gemini**: cada agente recebe um LL
 | [`tests/test_condominio.py`](tests/test_condominio.py) | Estado inicial, isolamento entre apartamentos, códigos que não se repetem, restauração e 20 threads disputando a mesma reserva (G5) |
 | [`tests/test_tools.py`](tests/test_tools.py) | Nenhuma tool recebe apartamento (G2); confirmação por taxa e de visitante (G1); data ocupada sem vazar dono; um capítulo por vez (G4) |
 | [`tests/test_agentes.py`](tests/test_agentes.py) | Runner do ADK com sessão em SQLite e reinício entre o pedido e a resposta: negar, aprovar, "já estou confirmando aqui", regulamento fora dos eventos (inclusive consultado direto pela `portaria`, como nos passos 11 e 12) e a matriz retomável × transferível |
-| [`tests/test_api.py`](tests/test_api.py) | Contrato: `201`, `404`, `409` (repetido, inexistente, de outra sessão), `422`, `503`, `500` em JSON, eventos após recriar a API e aprovações simultâneas (passo 14). Também: modelo que falha depois da aprovação (`200` com a mensagem da ação), mensagem com pendência aberta, duas pendências na mesma sessão e duas respostas simultâneas para a mesma confirmação |
-| [`tests/test_modelos.py`](tests/test_modelos.py) | Cadeia de modelos: troca em 429/503, pausa, tempo limite, 429 sem repetir no mesmo modelo, erros que propagam |
+| [`tests/test_api.py`](tests/test_api.py) | Contrato: `201`, `404`, `409` (repetido, inexistente, de outra sessão), `422`, `503`, `500` em JSON, eventos após recriar a API e aprovações simultâneas (passo 14). Também: modelo que falha depois da aprovação (`200` com a mensagem da ação), modelo que termina sem texto (a resposta da tool vira a `resposta`), eventos em camelCase, mensagem com pendência aberta, duas pendências na mesma sessão e duas respostas simultâneas para a mesma confirmação |
+| [`tests/test_modelos.py`](tests/test_modelos.py) | Cadeia de modelos: troca em 429/503, pausa, tempo limite, 429 sem repetir no mesmo modelo, assinatura neutra só para o Gemini 3, erros que propagam |
 | [`tests/test_readme.py`](tests/test_readme.py) | Cada trecho da seção Garantias bate com as linhas do arquivo citado |
 
 ### Testar o fluxo completo

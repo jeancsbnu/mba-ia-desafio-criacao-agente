@@ -6,6 +6,11 @@ algumas dezenas de chamadas. A cadeia tenta os modelos em ordem: se um responde
 429 (cota), 503 (sobrecarga) ou 404 (modelo indisponível para a chave), a mesma
 requisição vai para o próximo. As cotas dos modelos se somam. Um modelo que
 demora mais que o tempo limite também passa a vez ao próximo.
+
+Trocar de modelo no meio de uma volta tem um detalhe: o Gemini 3 recusa (400)
+uma chamada de tool sem "thought_signature", e os modelos 2.x não geram essa
+assinatura. Antes de enviar a um Gemini 3, a cadeia põe nessas chamadas a
+assinatura neutra que o Google documenta para histórico vindo de outro modelo.
 """
 
 import asyncio
@@ -33,6 +38,7 @@ _REPETIR_NO_MESMO_MODELO = (408, 500, 502, 503, 504)
 _PAUSA_APOS_FALHA = 120  # segundos sem tentar um modelo que falhou
 _TEMPO_LIMITE = 60  # segundos por chamada; depois disso conta como 504 e passa ao próximo
 _CHAMADA_LENTA = 20  # chamadas acima disso aparecem no log
+_ASSINATURA_NEUTRA = b"skip_thought_signature_validator"
 
 # Compartilhado entre os agentes: se a cota de um modelo acabou para um, acabou para todos.
 _pausado_ate: dict[str, float] = {}
@@ -71,7 +77,10 @@ class CadeiaDeModelos(BaseLlm):
         candidatos = disponiveis or self.modelos
 
         for posicao, modelo in enumerate(candidatos):
-            requisicao = llm_request.model_copy(update={"model": modelo.model})
+            mudancas: dict = {"model": modelo.model}
+            if _exige_assinatura(modelo.model):
+                mudancas["contents"] = _com_assinatura_neutra(llm_request.contents)
+            requisicao = llm_request.model_copy(update=mudancas)
             inicio = time.monotonic()
             try:
                 # A resposta inteira chega dentro do tempo limite e só depois é
@@ -93,6 +102,29 @@ class CadeiaDeModelos(BaseLlm):
             for resposta in respostas:
                 yield resposta
             return
+
+
+def _exige_assinatura(nome_modelo: str) -> bool:
+    return not nome_modelo.startswith(("gemini-1", "gemini-2"))
+
+
+def _com_assinatura_neutra(contents: list[types.Content]) -> list[types.Content]:
+    """Cópia do histórico com a assinatura neutra nas chamadas de tool que não têm assinatura.
+
+    Copia em vez de alterar: os objetos do histórico podem ser os mesmos dos eventos da sessão.
+    """
+    resultado = []
+    for conteudo in contents:
+        partes = conteudo.parts or []
+        if any(p.function_call and not p.thought_signature for p in partes):
+            conteudo = conteudo.model_copy(update={"parts": [
+                p.model_copy(update={"thought_signature": _ASSINATURA_NEUTRA})
+                if p.function_call and not p.thought_signature
+                else p
+                for p in partes
+            ]})
+        resultado.append(conteudo)
+    return resultado
 
 
 async def _com_tempo_limite(modelo: Gemini, requisicao: LlmRequest, stream: bool) -> list[LlmResponse]:

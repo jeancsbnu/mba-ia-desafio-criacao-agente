@@ -107,7 +107,8 @@ async def responder_confirmacao(
 
 @rotas.get("/sessoes/{session_id}/eventos")
 async def eventos(session_id: str, a: Assistente = Depends(assistente)) -> list[dict[str, Any]]:
-    return [e.model_dump(mode="json", exclude_none=True) for e in await a.eventos(session_id)]
+    # Mesmo formato do servidor do próprio ADK (adk web / api_server): camelCase, sem campos nulos.
+    return [e.model_dump(mode="json", by_alias=True, exclude_none=True) for e in await a.eventos(session_id)]
 
 
 # Rotas de verificação: leem o banco direto, sem passar pelo modelo.

@@ -89,3 +89,46 @@ def test_429_nao_e_repetido_no_mesmo_modelo(monkeypatch):
     for modelo in cadeia.modelos:
         codigos = modelo.retry_options.http_status_codes
         assert 429 not in codigos and 503 in codigos
+
+
+class Gravador(Gemini):
+    """Guarda o histórico que recebeu, sem ir à rede."""
+
+    recebido: list = []
+
+    async def generate_content_async(self, llm_request, stream=False):
+        Gravador.recebido = llm_request.contents
+        yield LlmResponse(content=types.Content(role="model", parts=[types.Part(text="ok")]))
+
+
+def historico_com_chamadas():
+    sem_assinatura = types.Part(function_call=types.FunctionCall(name="reservar_area", args={"area": "quadra"}))
+    com_assinatura = types.Part(function_call=types.FunctionCall(name="listar_minhas_reservas"), thought_signature=b"real")
+    return [types.Content(role="model", parts=[sem_assinatura, com_assinatura, types.Part(text="oi")])]
+
+
+def enviar_historico(nome_modelo, contents):
+    cadeia = m.CadeiaDeModelos(model=nome_modelo, modelos=[Gravador(model=nome_modelo)])
+
+    async def rodar():
+        return [r async for r in cadeia.generate_content_async(LlmRequest(model=nome_modelo, contents=contents))]
+
+    asyncio.run(rodar())
+    return Gravador.recebido
+
+
+def test_gemini_3_recebe_assinatura_neutra_nas_chamadas_sem_assinatura():
+    """O Gemini 3 recusa (400) chamada de tool sem thought_signature, como as geradas por um 2.x."""
+    original = historico_com_chamadas()
+    [enviado] = enviar_historico("gemini-3.5-flash", original)
+    sem, com, texto_ = enviado.parts
+    assert sem.thought_signature == m._ASSINATURA_NEUTRA
+    assert com.thought_signature == b"real"  # assinatura real é mantida
+    assert texto_.thought_signature is None
+    assert original[0].parts[0].thought_signature is None  # o histórico original não é alterado
+
+
+def test_gemini_2_recebe_o_historico_como_esta():
+    original = historico_com_chamadas()
+    [enviado] = enviar_historico("gemini-2.5-flash", original)
+    assert enviado.parts[0].thought_signature is None
