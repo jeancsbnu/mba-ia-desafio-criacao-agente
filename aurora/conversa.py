@@ -59,7 +59,7 @@ class Resultado:
 class Assistente:
     def __init__(self, modelos: Mapping[str, BaseLlm] | None = None):
         url = f"sqlite+aiosqlite:///{config.BANCO_SESSOES.as_posix()}"
-        self.sessoes = DatabaseSessionService(db_url=url)
+        self.sessoes = DatabaseSessionService(db_url=url, connect_args={"timeout": 30})  # espera o lock do SQLite
         self.runner = Runner(app=construir_app(modelos), session_service=self.sessoes)
         # Uma requisição por vez em cada sessão; sessões diferentes rodam em paralelo.
         self._travas: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)

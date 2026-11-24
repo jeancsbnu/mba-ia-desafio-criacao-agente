@@ -167,7 +167,26 @@ def criar_api(modelos: Mapping[str, BaseLlm] | None = None) -> FastAPI:
         # Mantém o contrato em JSON; o traceback continua indo para o log do servidor.
         return JSONResponse({"detail": "Erro interno do servidor."}, status_code=500)
 
+    api.add_middleware(CorpoSempreJson)
     return api
+
+
+class CorpoSempreJson:
+    """Trata o corpo de todo POST como JSON, o único formato do contrato.
+
+    O FastAPI desta versão só lê o corpo como JSON com o cabeçalho
+    "Content-Type: application/json"; sem ele, responde 422. Um
+    `curl -d '{...}'` sem `-H` manda application/x-www-form-urlencoded.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["method"] == "POST":
+            cabecalhos = [(nome, valor) for nome, valor in scope["headers"] if nome != b"content-type"]
+            scope = {**scope, "headers": [*cabecalhos, (b"content-type", b"application/json")]}
+        await self.app(scope, receive, send)
 
 
 app = criar_api()

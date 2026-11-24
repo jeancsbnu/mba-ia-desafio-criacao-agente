@@ -33,7 +33,7 @@ MODELOS_PADRAO = (
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
 )
-_CODIGOS_PARA_TROCAR = {404, 429, 500, 503, 504}
+_CODIGOS_PARA_TROCAR = {403, 404, 429, 500, 503, 504}  # 403/404: modelo não liberado para a chave
 _REPETIR_NO_MESMO_MODELO = (408, 500, 502, 503, 504)
 _PAUSA_APOS_FALHA = 120  # segundos sem tentar um modelo que falhou
 _TEMPO_LIMITE = 60  # segundos por chamada; depois disso conta como 504 e passa ao próximo
