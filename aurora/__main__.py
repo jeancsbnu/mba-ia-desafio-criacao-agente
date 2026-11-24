@@ -3,14 +3,13 @@
 import os
 
 import uvicorn
-from dotenv import load_dotenv
 
 from aurora import config
 
 
 def main() -> None:
-    # Carrega o .env antes de ler host e porta; variáveis já definidas no ambiente têm prioridade.
-    load_dotenv(config.RAIZ / ".env")
+    # Carrega o .env antes de ler host e porta (variáveis não vazias do terminal têm prioridade).
+    config.carregar_env()
     # Ambos opcionais. AURORA_PORTA: o script do fluxo usa para não disputar a 8000.
     # AURORA_HOST: 0.0.0.0 para acessar de fora da máquina (WSL, contêiner).
     uvicorn.run(

@@ -5,7 +5,7 @@ import aurora.__main__ as principal
 
 def subir(monkeypatch, **ambiente):
     chamado = {}
-    monkeypatch.setattr(principal, "load_dotenv", lambda *_a, **_k: None)
+    monkeypatch.setattr(principal.config, "carregar_env", lambda *_a, **_k: None)
     monkeypatch.setattr(principal.uvicorn, "run", lambda app, **opcoes: chamado.update(app=app, **opcoes))
     for nome in ("AURORA_HOST", "AURORA_PORTA"):
         monkeypatch.delenv(nome, raising=False)

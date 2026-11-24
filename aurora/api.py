@@ -9,7 +9,6 @@ from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from typing import Any
 
-from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from google.adk.models import BaseLlm
@@ -19,7 +18,7 @@ from pydantic import BaseModel, Field
 from aurora import banco, condominio, config
 from aurora.conversa import Assistente, ConfirmacaoInexistente, Resultado, SessaoInexistente
 
-load_dotenv(config.RAIZ / ".env")
+config.carregar_env()
 logger = logging.getLogger(__name__)
 
 
@@ -154,13 +153,18 @@ def criar_api(modelos: Mapping[str, BaseLlm] | None = None) -> FastAPI:
 
     @api.exception_handler(errors.APIError)
     async def modelo_indisponivel(request: Request, e: errors.APIError) -> JSONResponse:
-        # Todos os modelos da cadeia falharam (cota, sobrecarga). A mensagem do
-        # morador já ficou gravada na sessão; ele pode tentar de novo.
+        # Todos os modelos da cadeia falharam. A mensagem do morador já ficou
+        # gravada na sessão, e nada foi executado: reenviar é seguro.
         logger.error("Falha do modelo: %s", e)
-        return JSONResponse(
-            {"detail": "O assistente está indisponível no momento. Tente novamente em instantes."},
-            status_code=503,
-        )
+        if e.code in (400, 401, 403):
+            # Erro de configuração: tentar de novo não resolve.
+            detalhe = (
+                f"O modelo recusou a requisição (erro {e.code}). "
+                "Confira a GOOGLE_API_KEY e os modelos em AURORA_MODELOS."
+            )
+        else:
+            detalhe = f"O assistente está indisponível no momento (erro {e.code}). Tente novamente em instantes."
+        return JSONResponse({"detail": detalhe}, status_code=503)
 
     @api.exception_handler(Exception)
     async def erro_inesperado(request: Request, e: Exception) -> JSONResponse:
